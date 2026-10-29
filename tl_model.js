@@ -554,6 +554,131 @@ export function graphRangeForSegment(segment, activeDepth, activeFile) {
  * @param {number} boundEnd
  * @returns {{ depthStart: number, depthEnd: number }}
  */
+/**
+ * One chat drawn as a spine, with the other chats that actually belong to it
+ * hanging off the turn where they split. A file that shares a prefix and then
+ * stops is a fork, even though it has no messages of its own after the split.
+ * Unrelated chats are returned in `others` and are not drawn on the spine.
+ *
+ * @param {Record<string, object[]>} chats
+ * @param {string|null} activeFile
+ * @param {Record<string, {mainChat?: string|null}>} [metas]
+ * @returns {{ spine: object[], forks: object[], others: string[], related: string[] }}
+ */
+export function buildFlow(chats, activeFile, metas = {}) {
+    const source = chats && typeof chats === 'object' ? chats : {};
+    const names = Object.keys(source).filter(name => Array.isArray(source[name]) && source[name].length > 0);
+    if (!activeFile || !source[activeFile]?.length) {
+        return { spine: [], forks: [], others: names, related: [] };
+    }
+
+    const active = source[activeFile];
+    const activeStem = displayFileName(activeFile);
+    const stemToFile = new Map(names.map(name => [displayFileName(name), name]));
+
+    const namedParent = (file) => {
+        const raw = metas?.[file]?.mainChat;
+        if (!raw) {
+            return null;
+        }
+        if (source[raw]) {
+            return raw;
+        }
+        const withExt = raw.endsWith('.jsonl') ? raw : `${raw}.jsonl`;
+        if (source[withExt]) {
+            return withExt;
+        }
+        return stemToFile.get(raw) || stemToFile.get(displayFileName(raw)) || null;
+    };
+
+    const textAt = (file, depth) => normalizeMessageText(source[file][depth]?.mes);
+    const related = new Set([activeFile]);
+    for (const file of names) {
+        if (file === activeFile) {
+            continue;
+        }
+        const linked = namedParent(file) === activeFile || namedParent(activeFile) === file;
+        const sameOpening = textAt(file, 0) !== '' && textAt(file, 0) === textAt(activeFile, 0);
+        if (linked || sameOpening) {
+            related.add(file);
+        }
+    }
+
+    const spine = active.map((message, depth) => ({
+        depth,
+        name: message?.name || (message?.is_user ? 'You' : 'Character'),
+        isUser: Boolean(message?.is_user),
+        preview: previewText(message?.mes, 280),
+        swipeCount: Array.isArray(message?.swipes)
+            ? message.swipes.filter(swipe => normalizeMessageText(swipe) !== normalizeMessageText(message?.mes)).length
+            : 0,
+    }));
+
+    /** @type {object[]} */
+    const forks = [];
+    for (const file of related) {
+        if (file === activeFile) {
+            continue;
+        }
+        const messages = source[file];
+        let shared = 0;
+        const limit = Math.min(active.length, messages.length);
+        while (shared < limit && textAt(activeFile, shared) === textAt(file, shared)) {
+            shared += 1;
+        }
+        const linked = namedParent(file) === activeFile || namedParent(activeFile) === file;
+        if (shared === 0) {
+            if (linked) {
+                forks.push({
+                    anchor: 0,
+                    file,
+                    kind: 'linked',
+                    preview: previewText(messages[0]?.mes, 160),
+                    otherLength: messages.length,
+                });
+            }
+            continue;
+        }
+        if (shared < messages.length && shared < active.length) {
+            forks.push({
+                anchor: shared,
+                file,
+                kind: 'diverges',
+                preview: previewText(messages[shared]?.mes, 160),
+                otherLength: messages.length,
+            });
+        } else if (shared === messages.length && messages.length < active.length) {
+            forks.push({
+                anchor: messages.length - 1,
+                file,
+                kind: 'ends',
+                preview: '',
+                otherLength: messages.length,
+            });
+        } else if (shared === active.length && messages.length > active.length) {
+            forks.push({
+                anchor: active.length,
+                file,
+                kind: 'continues',
+                preview: previewText(messages[active.length]?.mes, 160),
+                otherLength: messages.length,
+            });
+        } else {
+            forks.push({
+                anchor: Math.max(0, active.length - 1),
+                file,
+                kind: 'same',
+                preview: '',
+                otherLength: messages.length,
+            });
+        }
+    }
+
+    forks.sort((a, b) => a.anchor - b.anchor || a.file.localeCompare(b.file));
+    const others = names.filter(name => !related.has(name)).sort();
+    return { spine, forks, others, related: [...related] };
+}
+
 export function shiftGraphRange(range, direction, boundStart, boundEnd) {
     const span = Math.max(1, range.depthEnd - range.depthStart);
     let depthStart = range.depthStart + (direction * span);

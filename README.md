@@ -28,7 +28,7 @@ Use ST's inbuilt extension installer.
   - `/tl` opens the timeline
   - `/tl r` drops the in-memory file cache and reads every chat again
 
-The tree opens on the current message. Show messages on a row to page through that run, 40 at a time. Swipes are listed under the message they belong to. Graph draws that run when it is short, or the last 80 messages when it is long.
+The open chat is a column of messages. Another file that shares that text shows up beside the turn where it splits, including a branch that stops at the split and has no further messages of its own. Chats that do not share an opening line stay in the chat menu instead of being drawn on top of this one.
 
 Previous branch and next branch move between forks and checkpoints. Search hides runs that do not contain every fragment. For example, `ear xam oop` matches a message that contains those pieces in any order.
 

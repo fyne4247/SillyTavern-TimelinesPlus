@@ -1,110 +1,51 @@
 import {
-    GRAPH_WINDOW,
-    PAGE_SIZE,
-    actionFile,
-    buildTimeline,
+    buildFlow,
     displayFileName,
-    graphElements,
-    graphRangeForSegment,
-    matchingDepths,
-    neighborBranch,
-    preferActiveFile,
+    normalizeMessageText,
     previewText,
     queryFragments,
-    segmentAt,
-    segmentKey,
-    shiftGraphRange,
-    visibleSegmentIds,
+    textMatchesFragments,
 } from './tl_model.js';
 
 /**
- * Mount the timeline into `root`. The caller owns SillyTavern.
- * `update` replaces chats, the cursor, and the loading note, then paints.
- *
  * @param {HTMLElement} root
  * @param {object} handlers
- * @param {function} [handlers.onOpen]
- * @param {function} [handlers.onFork]
- * @param {function} [handlers.onEdit]
- * @param {function} [handlers.onCheckpoint]
- * @param {function} [handlers.onDelete]
- * @param {function} [handlers.onClose]
- * @param {function} [handlers.formatMessage]
- * @param {function} [handlers.cytoscape]
- * @param {string} [handlers.userColor]
- * @param {string} [handlers.charColor]
  */
 export function mountTimeline(root, handlers) {
     const state = {
         chats: {},
-        timeline: null,
+        metas: {},
         activeFile: null,
         activeDepth: 0,
         query: '',
         loadingLabel: '',
-        /** @type {Set<string>} */
-        expandedKeys: new Set(),
-        /** @type {Map<string, number>} */
-        pageOffset: new Map(),
         detail: null,
-        graph: null,
-        cy: null,
+        matchCursor: 0,
+        scrollTo: null,
+        openSwipes: null,
         userColor: handlers.userColor || '',
         charColor: handlers.charColor || '',
     };
 
-    const onKeyDown = (event) => {
+    root.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            if (state.graph) {
-                event.preventDefault();
-                state.graph = null;
-                render();
-                return;
-            }
             handlers.onClose?.();
             return;
         }
         if (event.ctrlKey && event.shiftKey && (event.key === 'F' || event.key === 'f')) {
             event.preventDefault();
             root.querySelector('.tlp-search')?.focus();
-            return;
         }
-        const target = event.target;
-        if (!(target instanceof HTMLElement) || !target.classList.contains('tlp-row')) {
-            return;
-        }
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            const rows = [...root.querySelectorAll('.tlp-row')];
-            const index = rows.indexOf(target);
-            const next = rows[index + (event.key === 'ArrowDown' ? 1 : -1)];
-            next?.focus();
-        } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-            event.preventDefault();
-            const key = target.getAttribute('data-key');
-            if (!key) {
-                return;
-            }
-            if (event.key === 'ArrowRight') {
-                state.expandedKeys.add(key);
-            } else {
-                state.expandedKeys.delete(key);
-            }
-            render();
-            root.querySelector(`[data-key="${CSS.escape(key)}"]`)?.focus();
-            return;
-        } else if (event.key === 'Enter') {
-            event.preventDefault();
-            target.querySelector('[data-act="open-end"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        }
-    };
-    root.addEventListener('keydown', onKeyDown);
+    });
 
     function update(partial) {
         if (partial.chats) {
             state.chats = partial.chats;
         }
-        if (Object.prototype.hasOwnProperty.call(partial, 'activeFile')) {
+        if (partial.metas) {
+            state.metas = partial.metas;
+        }
+        if (Object.prototype.hasOwnProperty.call(partial, 'activeFile') && partial.activeFile) {
             state.activeFile = partial.activeFile;
         }
         if (Object.prototype.hasOwnProperty.call(partial, 'activeDepth')) {
@@ -119,48 +60,30 @@ export function mountTimeline(root, handlers) {
         if (partial.charColor) {
             state.charColor = partial.charColor;
         }
-        if (partial.expandActive && state.activeFile) {
-            const timeline = preferActiveFile(
-                rebuild(),
-                state.activeFile,
-            );
-            const here = segmentAt(timeline, state.activeFile, state.activeDepth);
-            if (here) {
-                state.expandedKeys.add(segmentKey(here));
-                const offset = Math.floor((state.activeDepth - here.depthStart) / PAGE_SIZE) * PAGE_SIZE;
-                state.pageOffset.set(segmentKey(here), offset);
-            }
+        if (partial.scrollToActive) {
+            state.scrollTo = state.activeDepth;
         }
         render();
     }
 
-    function rebuild() {
-        return buildTimeline(state.chats);
-    }
-
     function destroy() {
-        destroyGraph();
-        root.removeEventListener('keydown', onKeyDown);
         root.replaceChildren();
     }
 
-    function destroyGraph() {
-        if (state.cy) {
-            state.cy.destroy();
-            state.cy = null;
-        }
+    function flow() {
+        return buildFlow(state.chats, state.activeFile, state.metas);
     }
 
     function render() {
         const search = root.querySelector('.tlp-search');
         const hadSearchFocus = search && document.activeElement === search;
         const selectionStart = search?.selectionStart ?? null;
-        const treeScroll = root.querySelector('.tlp-tree')?.scrollTop || 0;
-        destroyGraph();
-
-        state.timeline = preferActiveFile(buildTimeline(state.chats), state.activeFile);
+        const flowScroll = root.querySelector('.tlp-flow')?.scrollTop || 0;
+        const picture = flow();
         const fragments = queryFragments(state.query);
-        const visible = visibleSegmentIds(state.timeline, state.chats, state.query);
+        const matches = picture.spine
+            .map((row, index) => ({ row, index }))
+            .filter(({ row }) => rowMatches(row, fragments));
 
         root.replaceChildren();
         if (state.userColor) {
@@ -169,16 +92,11 @@ export function mountTimeline(root, handlers) {
         if (state.charColor) {
             root.style.setProperty('--tlp-char', state.charColor);
         }
-
-        root.append(renderHeader(fragments, visible));
-        if (state.graph) {
-            root.append(renderGraph());
-        } else {
-            const body = el('div', 'tlp-body');
-            body.append(renderTree(visible, fragments));
-            body.append(renderDetail());
-            root.append(body);
-        }
+        root.append(renderHeader(picture, fragments, matches));
+        const body = el('div', 'tlp-body');
+        body.append(renderFlow(picture, fragments, matches));
+        body.append(renderDetail());
+        root.append(body);
 
         const nextSearch = root.querySelector('.tlp-search');
         if (hadSearchFocus && nextSearch) {
@@ -187,280 +105,192 @@ export function mountTimeline(root, handlers) {
                 nextSearch.setSelectionRange(selectionStart, selectionStart);
             }
         }
-        const nextTree = root.querySelector('.tlp-tree');
-        if (nextTree) {
-            nextTree.scrollTop = treeScroll;
+        const scroller = root.querySelector('.tlp-flow');
+        if (scroller) {
+            if (state.scrollTo !== null) {
+                const target = scroller.querySelector(`[data-depth="${state.scrollTo}"]`);
+                target?.scrollIntoView({ block: 'center' });
+                state.scrollTo = null;
+            } else {
+                scroller.scrollTop = flowScroll;
+            }
         }
     }
 
-    function renderHeader(fragments, visible) {
+    function renderHeader(picture, fragments, matches) {
         const header = el('div', 'tlp-header');
         const search = document.createElement('input');
         search.className = 'tlp-search text_pole';
         search.type = 'search';
-        search.placeholder = 'Search messages';
+        search.placeholder = 'Search this chat';
         search.value = state.query;
         search.addEventListener('input', () => {
             state.query = search.value;
+            state.matchCursor = 0;
+            const first = matchesFor(flow())[0];
+            state.scrollTo = first === undefined ? null : first;
             render();
         });
         header.append(search);
 
         const status = el('div', 'tlp-status');
-        const matchCount = visible ? visible.size : null;
-        if (fragments.length && matchCount === 0) {
-            status.textContent = 'No messages match.';
+        if (!state.activeFile) {
+            status.textContent = 'No chat is open.';
+        } else if (fragments.length && matches.length === 0) {
+            status.textContent = 'No messages in this chat match.';
         } else if (fragments.length) {
-            status.textContent = `${matchCount} matching ${matchCount === 1 ? 'branch' : 'branches'}.`;
+            status.textContent = `${matches.length} matching ${matches.length === 1 ? 'message' : 'messages'}.`;
         } else {
-            status.textContent = state.loadingLabel || '';
+            const forkCount = picture.forks.length;
+            const name = displayFileName(state.activeFile);
+            status.textContent = forkCount
+                ? `${name} · ${picture.spine.length} messages · ${forkCount} ${forkCount === 1 ? 'fork' : 'forks'}`
+                : `${name} · ${picture.spine.length} messages`;
+            if (state.loadingLabel) {
+                status.textContent = `${status.textContent}. ${state.loadingLabel}`;
+            }
         }
         header.append(status);
 
         const tools = el('div', 'tlp-tools');
-        tools.append(button('Previous branch', () => stepBranch(-1)));
-        tools.append(button('Next branch', () => stepBranch(1)));
+        tools.append(button('Previous fork', () => stepFork(picture, -1)));
+        tools.append(button('Next fork', () => stepFork(picture, 1)));
+        if (fragments.length) {
+            tools.append(button('Previous match', () => stepMatch(matches, -1)));
+            tools.append(button('Next match', () => stepMatch(matches, 1)));
+        }
         tools.append(button('Close', () => handlers.onClose?.()));
         header.append(tools);
+
+        const picker = document.createElement('select');
+        picker.className = 'tlp-file text_pole';
+        const related = el('optgroup');
+        related.label = 'This chat and its forks';
+        for (const file of picture.related) {
+            related.append(option(file, file === state.activeFile));
+        }
+        picker.append(related);
+        if (picture.others.length) {
+            const others = el('optgroup');
+            others.label = 'Other chats, not connected by text';
+            for (const file of picture.others) {
+                others.append(option(file, false));
+            }
+            picker.append(others);
+        }
+        picker.addEventListener('change', () => switchFile(picker.value, null));
+        header.append(picker);
         return header;
     }
 
-    function stepBranch(direction) {
-        const point = neighborBranch(state.timeline, state.activeFile, state.activeDepth, direction);
-        if (!point) {
-            return;
-        }
-        const file = actionFile(point, state.activeFile);
-        state.detail = { file, depth: point.depthStart, swipeId: null };
-        state.expandedKeys.add(segmentKey(point));
-        state.graph = null;
-        render();
-        const row = root.querySelector(`[data-key="${CSS.escape(segmentKey(point))}"]`);
-        row?.scrollIntoView({ block: 'nearest' });
-        row?.focus();
-    }
-
-    function renderTree(visible, fragments) {
-        const tree = el('div', 'tlp-tree');
-        tree.setAttribute('role', 'tree');
-        if (!state.timeline.roots.length) {
+    function renderFlow(picture, fragments) {
+        const scroller = el('div', 'tlp-flow');
+        if (!picture.spine.length) {
             const empty = el('p', 'tlp-empty');
-            empty.textContent = 'This character has no chat messages yet.';
-            tree.append(empty);
-            return tree;
+            empty.textContent = state.loadingLabel || 'This chat has no messages yet.';
+            scroller.append(empty);
+            return scroller;
         }
-        for (const rootSegment of state.timeline.roots) {
-            appendSegment(tree, rootSegment, 0, visible, fragments);
+
+        const byAnchor = new Map();
+        for (const fork of picture.forks) {
+            const list = byAnchor.get(fork.anchor) || [];
+            list.push(fork);
+            byAnchor.set(fork.anchor, list);
         }
-        return tree;
+
+        picture.spine.forEach((row, index) => {
+            scroller.append(renderRow(row, byAnchor.get(index) || [], fragments));
+        });
+        const trailing = byAnchor.get(picture.spine.length) || [];
+        if (trailing.length) {
+            const tail = el('div', 'tlp-flow-row is-tail');
+            tail.append(el('div', 'tlp-card tlp-card-tail'));
+            const side = el('div', 'tlp-forks');
+            for (const fork of trailing) {
+                side.append(forkCard(fork));
+            }
+            tail.append(side);
+            scroller.append(tail);
+        }
+        return scroller;
     }
 
-    function appendSegment(parent, segment, depth, visible, fragments) {
-        if (visible && !visible.has(segment.id)) {
-            return;
+    function renderRow(row, forks, fragments) {
+        const wrap = el('div', 'tlp-flow-row');
+        wrap.dataset.depth = String(row.depth);
+        const selected = state.detail && state.detail.file === state.activeFile && state.detail.depth === row.depth;
+        const current = row.depth === state.activeDepth;
+        const dim = fragments.length > 0 && !rowMatches(row, fragments) && forks.length === 0;
+        const card = el('button', `tlp-card${current ? ' is-current' : ''}${selected ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${row.isUser ? ' is-user' : ''}`);
+        card.type = 'button';
+        card.dataset.depth = String(row.depth);
+        const who = el('div', 'tlp-who');
+        who.textContent = `${row.name} · ${row.depth + 1}`;
+        const text = el('div', 'tlp-card-text');
+        text.textContent = row.preview || 'Empty message';
+        card.append(who, text);
+        if (row.swipeCount > 0) {
+            const swipes = el('div', 'tlp-swipe-note');
+            swipes.textContent = row.swipeCount === 1 ? '1 other swipe' : `${row.swipeCount} other swipes`;
+            card.append(swipes);
         }
-        const key = segmentKey(segment);
-        const expanded = state.expandedKeys.has(key) || (fragments.length > 0 && visible?.has(segment.id) && matchingDepths(segment, state.chats, fragments).length > 0);
-        const here = state.activeFile
-            && segment.files.includes(state.activeFile)
-            && state.activeDepth >= segment.depthStart
-            && state.activeDepth < segment.depthEnd;
-
-        const block = el('div', `tlp-segment${here ? ' is-current' : ''}`);
-        block.style.setProperty('--tlp-nest', String(depth));
-
-        const row = el('div', 'tlp-row');
-        row.tabIndex = 0;
-        row.setAttribute('role', 'treeitem');
-        row.setAttribute('data-key', key);
-        row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-
-        const twist = button(expanded ? 'Collapse' : 'Expand', () => {
-            if (state.expandedKeys.has(key)) {
-                state.expandedKeys.delete(key);
-            } else {
-                state.expandedKeys.add(key);
-            }
+        card.addEventListener('click', () => {
+            state.detail = { file: state.activeFile, depth: row.depth };
+            state.openSwipes = state.openSwipes === row.depth ? null : row.depth;
             render();
-        }, 'tlp-expand');
-        twist.textContent = expanded ? '▾' : '▸';
-        twist.title = expanded ? 'Hide messages' : 'Show messages';
-        twist.setAttribute('aria-label', twist.title);
-        row.append(twist);
+        });
+        wrap.append(card);
 
-        const main = el('div', 'tlp-row-main');
-        const title = el('div', 'tlp-title');
-        const count = segment.depthEnd - segment.depthStart;
-        const rangeLabel = document.createElement('span');
-        rangeLabel.textContent = `Messages ${segment.depthStart + 1}–${segment.depthEnd}`;
-        title.append(rangeLabel);
-        const meta = el('span', 'tlp-meta');
-        meta.textContent = count === 1 ? '1 message' : `${count} messages`;
-        title.append(meta);
-        if (here) {
-            const badge = el('span', 'tlp-badge');
-            badge.textContent = 'You are here';
-            title.append(badge);
+        const side = el('div', 'tlp-forks');
+        for (const fork of forks) {
+            side.append(forkCard(fork));
         }
-        if (segment.checkpoint) {
-            const badge = el('span', 'tlp-badge tlp-badge-check');
-            badge.textContent = `Checkpoint ${displayFileName(segment.checkpoint.name)}`;
-            title.append(badge);
+        if (state.openSwipes === row.depth) {
+            side.append(swipeList(row.depth));
         }
-        if (segment.swipeMessages > 0) {
-            const badge = el('span', 'tlp-meta');
-            badge.textContent = segment.swipeMessages === 1 ? '1 message with swipes' : `${segment.swipeMessages} messages with swipes`;
-            title.append(badge);
-        }
-        main.append(title);
-
-        const preview = el('div', 'tlp-preview');
-        preview.textContent = segment.preview || 'Empty message';
-        main.append(preview);
-
-        const files = el('div', 'tlp-files');
-        if (segment.files.length === 1) {
-            files.textContent = displayFileName(segment.files[0]);
-        } else {
-            files.textContent = `Shared by ${segment.files.length} chats: ${segment.files.map(displayFileName).join(', ')}`;
-        }
-        main.append(files);
-        row.append(main);
-
-        const actions = el('div', 'tlp-actions');
-        const file = actionFile(segment, state.activeFile);
-        const endDepth = segment.depthEnd - 1;
-        actions.append(button('Open', () => openAt(file, endDepth), '', 'open-end'));
-        actions.append(button('Fork', () => handlers.onFork?.(file, endDepth, null)));
-        const range = graphRangeForSegment(segment, state.activeDepth, state.activeFile);
-        const graphLabel = range.windowed ? `Graph last ${GRAPH_WINDOW}` : 'Graph';
-        actions.append(button(graphLabel, () => {
-            state.graph = {
-                depthStart: range.depthStart,
-                depthEnd: range.depthEnd,
-                boundStart: segment.depthStart,
-                boundEnd: segment.depthEnd,
-            };
-            render();
-        }));
-        row.append(actions);
-        block.append(row);
-
-        if (expanded) {
-            block.append(renderMessages(segment, fragments));
-        }
-
-        parent.append(block);
-        for (const childId of segment.childIds) {
-            const child = state.timeline.byId.get(childId);
-            if (child) {
-                appendSegment(block, child, depth + 1, visible, fragments);
-            }
-        }
-    }
-
-    function renderMessages(segment, fragments) {
-        const wrap = el('div', 'tlp-messages');
-        const key = segmentKey(segment);
-        const file = actionFile(segment, state.activeFile);
-        const messages = state.chats[file] || [];
-        const hits = fragments.length ? matchingDepths(segment, state.chats, fragments) : null;
-        /** @type {number[]} */
-        let depths;
-        if (hits) {
-            depths = hits.slice(0, PAGE_SIZE);
-            if (hits.length > PAGE_SIZE) {
-                const note = el('div', 'tlp-meta');
-                note.textContent = `${hits.length} matches in this branch. Showing the first ${PAGE_SIZE}.`;
-                wrap.append(note);
-            }
-        } else {
-            const total = segment.depthEnd - segment.depthStart;
-            const offset = Math.min(state.pageOffset.get(key) || 0, Math.max(0, total - 1));
-            const start = segment.depthStart + offset;
-            const end = Math.min(segment.depthEnd, start + PAGE_SIZE);
-            depths = [];
-            for (let depth = start; depth < end; depth += 1) {
-                depths.push(depth);
-            }
-            if (total > PAGE_SIZE) {
-                const bar = el('div', 'tlp-pager');
-                const page = Math.floor(offset / PAGE_SIZE) + 1;
-                const pages = Math.ceil(total / PAGE_SIZE);
-                const label = el('span', 'tlp-meta');
-                label.textContent = `Page ${page} of ${pages}`;
-                bar.append(label);
-                bar.append(button('Previous page', () => {
-                    state.pageOffset.set(key, Math.max(0, offset - PAGE_SIZE));
-                    render();
-                }));
-                bar.append(button('Next page', () => {
-                    state.pageOffset.set(key, Math.min(offset + PAGE_SIZE, (pages - 1) * PAGE_SIZE));
-                    render();
-                }));
-                const cursorInside = state.activeFile
-                    && segment.files.includes(state.activeFile)
-                    && state.activeDepth >= segment.depthStart
-                    && state.activeDepth < segment.depthEnd;
-                if (cursorInside) {
-                    bar.append(button('Current message', () => {
-                        const local = Math.max(0, state.activeDepth - segment.depthStart);
-                        state.pageOffset.set(key, Math.floor(local / PAGE_SIZE) * PAGE_SIZE);
-                        state.expandedKeys.add(key);
-                        render();
-                    }));
-                }
-                wrap.append(bar);
-            }
-        }
-
-        for (const depth of depths) {
-            const message = messages[depth];
-            if (!message) {
-                continue;
-            }
-            wrap.append(renderMessageRow(file, depth, message, segment));
-        }
+        wrap.append(side);
         return wrap;
     }
 
-    function renderMessageRow(file, depth, message, segment) {
-        const row = el('div', `tlp-message${depth === state.activeDepth && file === state.activeFile ? ' is-current' : ''}`);
-        const who = el('div', `tlp-who${message.is_user ? ' is-user' : ''}`);
-        who.textContent = message.name || (message.is_user ? 'You' : 'Character');
-        const body = el('button', 'tlp-message-text');
-        body.type = 'button';
-        body.textContent = `${depth + 1}. ${previewText(message.mes, 140) || 'Empty message'}`;
-        body.addEventListener('click', () => {
-            state.detail = { file, depth, swipeId: null };
-            render();
+    function forkCard(fork) {
+        const card = el('button', `tlp-fork tlp-fork-${fork.kind}`);
+        card.type = 'button';
+        const title = el('div', 'tlp-who');
+        title.textContent = forkTitle(fork);
+        card.append(title);
+        if (fork.preview) {
+            const text = el('div', 'tlp-card-text');
+            text.textContent = fork.preview;
+            card.append(text);
+        }
+        const hint = el('div', 'tlp-swipe-note');
+        hint.textContent = `${displayFileName(fork.file)} · ${fork.otherLength} messages`;
+        card.append(hint);
+        card.addEventListener('click', () => {
+            const depth = fork.kind === 'continues' ? fork.anchor : Math.min(fork.anchor, Math.max(0, fork.otherLength - 1));
+            switchFile(fork.file, depth);
         });
-        const actions = el('div', 'tlp-actions');
-        actions.append(button('Open', () => openAt(file, depth)));
-        actions.append(button('Fork', () => handlers.onFork?.(file, depth, null)));
-        row.append(who, body, actions);
+        return card;
+    }
 
-        const swipes = Array.isArray(message.swipes) ? message.swipes : [];
-        const extras = swipes
-            .map((text, swipeId) => ({ text, swipeId }))
-            .filter(item => String(item.text ?? '') !== String(message.mes ?? ''));
-        if (extras.length > 0) {
-            const list = el('div', 'tlp-swipes');
-            for (const item of extras) {
-                const swipeRow = el('div', 'tlp-swipe');
-                const label = el('div', 'tlp-preview');
-                label.textContent = `Swipe ${item.swipeId + 1}. ${previewText(item.text, 120)}`;
-                const swipeActions = el('div', 'tlp-actions');
-                swipeActions.append(button('Fork swipe', () => handlers.onFork?.(file, depth, item.swipeId)));
-                swipeRow.append(label, swipeActions);
-                list.append(swipeRow);
+    function swipeList(depth) {
+        const message = state.chats[state.activeFile]?.[depth];
+        const box = el('div', 'tlp-swipes');
+        const swipes = Array.isArray(message?.swipes) ? message.swipes : [];
+        swipes.forEach((text, swipeId) => {
+            if (normalizeMessageText(text) === normalizeMessageText(message?.mes)) {
+                return;
             }
-            row.append(list);
-        }
-        if (state.detail && state.detail.file === file && state.detail.depth === depth && state.detail.segmentId === segment.id) {
-            row.classList.add('is-selected');
-        }
-        return row;
+            const row = el('div', 'tlp-swipe');
+            const label = el('div', 'tlp-card-text');
+            label.textContent = `Swipe ${swipeId + 1}. ${previewText(text, 160)}`;
+            const actions = el('div', 'tlp-actions');
+            actions.append(button('Fork this swipe', () => handlers.onFork?.(state.activeFile, depth, swipeId)));
+            row.append(label, actions);
+            box.append(row);
+        });
+        return box;
     }
 
     function renderDetail() {
@@ -468,7 +298,7 @@ export function mountTimeline(root, handlers) {
         const detail = state.detail;
         if (!detail) {
             const note = el('p', 'tlp-empty');
-            note.textContent = 'Select a message to read it here. Open, fork, edit, and checkpoint use the chat file named on the button.';
+            note.textContent = 'The column on the left is this chat, one message at a time. A card on the right is another file that splits off at that message. Select a message to read it and to open, fork, edit, or checkpoint it.';
             aside.append(note);
             return aside;
         }
@@ -494,8 +324,8 @@ export function mountTimeline(root, handlers) {
             body.textContent = message.mes || '';
         }
         const actions = el('div', 'tlp-actions tlp-detail-actions');
-        actions.append(button('Open', () => openAt(detail.file, detail.depth)));
-        actions.append(button('Fork', () => handlers.onFork?.(detail.file, detail.depth, detail.swipeId ?? null)));
+        actions.append(button('Open', () => handlers.onOpen?.(detail.file, detail.depth)));
+        actions.append(button('Fork', () => handlers.onFork?.(detail.file, detail.depth, null)));
         actions.append(button('Edit', () => handlers.onEdit?.(detail.file, detail.depth)));
         actions.append(button('Checkpoint', () => handlers.onCheckpoint?.(detail.file, detail.depth)));
         if (detail.file !== state.activeFile) {
@@ -505,140 +335,108 @@ export function mountTimeline(root, handlers) {
         return aside;
     }
 
-    function renderGraph() {
-        const wrap = el('div', 'tlp-graph');
-        const bar = el('div', 'tlp-graph-bar');
-        const label = el('span', 'tlp-meta');
-        label.textContent = `Messages ${state.graph.depthStart + 1}–${state.graph.depthEnd}`;
-        bar.append(label);
-        bar.append(button('Previous window', () => {
-            const next = shiftGraphRange(state.graph, -1, state.graph.boundStart, state.graph.boundEnd);
-            state.graph = { ...state.graph, ...next };
-            render();
-        }));
-        bar.append(button('Next window', () => {
-            const next = shiftGraphRange(state.graph, 1, state.graph.boundStart, state.graph.boundEnd);
-            state.graph = { ...state.graph, ...next };
-            render();
-        }));
-        bar.append(button('Back to tree', () => {
-            state.graph = null;
-            render();
-        }));
-        wrap.append(bar);
-
-        const host = el('div', 'tlp-cy');
-        wrap.append(host);
-
-        const built = graphElements(state.chats, state.graph.depthStart, state.graph.depthEnd);
-        queueMicrotask(() => {
-            if (!host.isConnected || typeof handlers.cytoscape !== 'function') {
-                return;
-            }
-            const instance = handlers.cytoscape({
-                container: host,
-                elements: [...built.nodes, ...built.edges],
-                layout: { name: 'preset', fit: true, padding: 24 },
-                minZoom: 0.05,
-                maxZoom: 2.5,
-                hideEdgesOnViewport: true,
-                textureOnViewport: true,
-                style: graphStyle(state.userColor, state.charColor),
-            });
-            if (!instance) {
-                const note = el('p', 'tlp-empty');
-                note.textContent = 'The graph library has not finished loading.';
-                wrap.append(note);
-                return;
-            }
-            state.cy = instance;
-            state.cy.on('tap', 'node', (event) => {
-                const data = event.target.data();
-                const file = actionFile({ files: data.files }, state.activeFile);
-                state.detail = { file, depth: data.depth, swipeId: null };
-                const existing = bar.querySelector('.tlp-graph-pick');
-                existing?.remove();
-                const pick = el('span', 'tlp-graph-pick');
-                pick.textContent = `${data.name || 'Message'} ${data.depth + 1} selected. Back to the tree keeps this selection.`;
-                bar.append(pick);
-            });
-        });
-        return wrap;
+    function switchFile(file, depth) {
+        const messages = state.chats[file] || [];
+        state.activeFile = file;
+        state.activeDepth = depth === null || depth === undefined
+            ? Math.max(0, messages.length - 1)
+            : depth;
+        state.detail = { file, depth: state.activeDepth };
+        state.scrollTo = state.activeDepth;
+        state.openSwipes = null;
+        render();
     }
 
-    function openAt(file, depth) {
-        state.detail = { file, depth, swipeId: null };
-        handlers.onOpen?.(file, depth);
+    function stepFork(picture, direction) {
+        if (!picture.forks.length) {
+            return;
+        }
+        const anchors = [...new Set(picture.forks.map(fork => fork.anchor))].sort((a, b) => a - b);
+        const here = state.scrollDepth ?? state.activeDepth;
+        const next = direction > 0
+            ? anchors.find(anchor => anchor > here)
+            : [...anchors].reverse().find(anchor => anchor < here);
+        const target = next === undefined ? anchors[direction > 0 ? 0 : anchors.length - 1] : next;
+        state.scrollTo = Math.min(target, Math.max(0, picture.spine.length - 1));
+        state.scrollDepth = target;
+        render();
+    }
+
+    function stepMatch(matches, direction) {
+        if (!matches.length) {
+            return;
+        }
+        state.matchCursor = (state.matchCursor + direction + matches.length) % matches.length;
+        const depth = matches[state.matchCursor].row.depth;
+        state.scrollTo = depth;
+        state.detail = { file: state.activeFile, depth };
+        render();
+    }
+
+    function matchesFor(picture) {
+        const fragments = queryFragments(state.query);
+        return picture.spine.filter(row => rowMatches(row, fragments)).map(row => row.depth);
+    }
+
+    function rowMatches(row, fragments) {
+        if (!fragments.length) {
+            return true;
+        }
+        if (textMatchesFragments(row.preview, fragments)) {
+            return true;
+        }
+        const message = state.chats[state.activeFile]?.[row.depth];
+        if (message && textMatchesFragments(message.mes, fragments)) {
+            return true;
+        }
+        return Array.isArray(message?.swipes) && message.swipes.some(swipe => textMatchesFragments(swipe, fragments));
     }
 
     return { update, destroy };
 }
 
-/**
- * @param {string} [userColor]
- * @param {string} [charColor]
- * @returns {object[]}
- */
-export function graphStyle(userColor, charColor) {
-    const user = userColor || 'var(--tlp-user, #8fb4d4)';
-    const character = charColor || 'var(--tlp-char, #d8d2c8)';
-    return [
-        {
-            selector: 'node',
-            style: {
-                width: 18,
-                height: 18,
-                'background-color': character,
-                label: '',
-            },
-        },
-        {
-            selector: 'node[?is_user]',
-            style: { 'background-color': user },
-        },
-        {
-            selector: 'edge',
-            style: {
-                width: 1.5,
-                'line-color': '#8a8175',
-                'curve-style': 'straight',
-                'target-arrow-shape': 'triangle',
-                'target-arrow-color': '#8a8175',
-                'arrow-scale': 0.7,
-            },
-        },
-    ];
+function forkTitle(fork) {
+    const name = displayFileName(fork.file);
+    if (fork.kind === 'ends') {
+        return `${name} stops here`;
+    }
+    if (fork.kind === 'diverges') {
+        return `${name} splits here`;
+    }
+    if (fork.kind === 'continues') {
+        return `${name} keeps going`;
+    }
+    if (fork.kind === 'linked') {
+        return `${name} is linked, but the text does not line up`;
+    }
+    return `${name} matches this chat`;
 }
 
-/**
- * @param {string} tag
- * @param {string} className
- * @returns {HTMLElement}
- */
-function el(tag, className) {
-    const node = document.createElement(tag);
-    node.className = className;
+function option(file, selected) {
+    const node = document.createElement('option');
+    node.value = file;
+    node.textContent = displayFileName(file);
+    node.selected = selected;
     return node;
 }
 
-/**
- * @param {string} label
- * @param {function} onClick
- * @param {string} [className]
- * @param {string} [act]
- * @returns {HTMLButtonElement}
- */
-function button(label, onClick, className = '', act = '') {
+function el(tag, className) {
+    const node = document.createElement(tag);
+    if (className) {
+        node.className = className;
+    }
+    return node;
+}
+
+function button(label, onClick) {
     const node = document.createElement('button');
     node.type = 'button';
-    node.className = `menu_button tlp-button ${className}`.trim();
+    node.className = 'menu_button tlp-button';
     node.textContent = label;
-    if (act) {
-        node.dataset.act = act;
-    }
     node.addEventListener('click', (event) => {
         event.stopPropagation();
         onClick();
     });
     return node;
 }
+

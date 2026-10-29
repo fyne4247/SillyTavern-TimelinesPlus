@@ -13,26 +13,8 @@ const cache = new Map();
 let view = null;
 let loadToken = 0;
 let listenersBound = false;
-/** @type {{ chats: Record<string, object[]>, token: number }} */
-let session = { chats: {}, token: 0 };
-
-function loadCytoscape() {
-    const src = `${extensionFolderPath}cytoscape.min.js`;
-    if (typeof globalThis.cytoscape === 'function') {
-        return Promise.resolve(globalThis.cytoscape);
-    }
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = src;
-        script.onload = () => resolve(globalThis.cytoscape);
-        script.onerror = () => reject(new Error(`Timelines: failed to load ${src}`));
-        document.head.appendChild(script);
-    });
-}
-
-loadCytoscape().catch((error) => {
-    console.error(error);
-});
+/** @type {{ chats: Record<string, object[]>, metas: Record<string, {mainChat: string|null}>, token: number }} */
+let session = { chats: {}, metas: {}, token: 0 };
 
 function activeFileName(context) {
     const chatId = context?.chatId;
@@ -88,12 +70,6 @@ function ensureView() {
     const root = document.getElementById('tlpRoot');
     view = mountTimeline(root, {
         formatMessage,
-        cytoscape: (options) => {
-            if (typeof globalThis.cytoscape !== 'function') {
-                return null;
-            }
-            return globalThis.cytoscape(options);
-        },
         onClose: () => closeModal(),
         onOpen: async (file, depth) => {
             closeModal();
@@ -198,10 +174,12 @@ async function fetchChat(context, fileName) {
     if (!Array.isArray(data)) {
         return null;
     }
+    let mainChat = null;
     if (!isGroup) {
-        data.shift();
+        const header = data.shift();
+        mainChat = header?.chat_metadata?.main_chat || null;
     }
-    return data;
+    return { messages: data, mainChat };
 }
 
 async function pool(items, limit, worker) {
@@ -250,7 +228,7 @@ function bindListeners() {
 async function openTimeline(reload) {
     bindListeners();
     const token = ++loadToken;
-    session = { chats: {}, token };
+    session = { chats: {}, metas: {}, token };
     if (reload) {
         cache.clear();
     }
@@ -260,6 +238,7 @@ async function openTimeline(reload) {
     const live = Array.isArray(context.chat) ? context.chat : [];
     if (file && live.length > 0) {
         session.chats[file] = live;
+        session.metas[file] = { mainChat: context.chatMetadata?.main_chat || null };
     }
 
     showModal();
@@ -267,10 +246,11 @@ async function openTimeline(reload) {
     const depth = Math.max(0, live.length - 1);
     mounted.update({
         chats: session.chats,
+        metas: session.metas,
         activeFile: file,
         activeDepth: depth,
         loadingLabel: 'Loading other chats…',
-        expandActive: true,
+        scrollToActive: true,
         ...colors(),
     });
 
@@ -281,6 +261,7 @@ async function openTimeline(reload) {
         console.error(error);
         mounted.update({
             chats: session.chats,
+            metas: session.metas,
             loadingLabel: 'The chat list could not be loaded.',
             ...colors(),
         });
@@ -292,7 +273,7 @@ async function openTimeline(reload) {
 
     const pending = list.filter(item => item?.file_name && item.file_name !== file);
     if (pending.length === 0) {
-        mounted.update({ chats: session.chats, loadingLabel: '', ...colors() });
+        mounted.update({ chats: session.chats, metas: session.metas, loadingLabel: '', ...colors() });
         return;
     }
 
@@ -303,27 +284,27 @@ async function openTimeline(reload) {
         }
         const stamp = `${item.file_size || ''}|${item.last_mes || ''}`;
         const cached = cache.get(item.file_name);
-        let messages = cached && stamp !== '|' && cached.stamp === stamp ? cached.messages : null;
-        if (!messages) {
+        let loaded = cached && stamp !== '|' && cached.stamp === stamp ? cached : null;
+        if (!loaded) {
             try {
-                messages = await fetchChat(getContext(), item.file_name);
+                const fetched = await fetchChat(getContext(), item.file_name);
+                if (fetched) {
+                    loaded = { stamp, messages: fetched.messages, mainChat: fetched.mainChat };
+                    cache.set(item.file_name, loaded);
+                }
             } catch (error) {
                 console.error(error);
-                messages = null;
-            }
-            if (messages) {
-                cache.set(item.file_name, { stamp, messages });
             }
         }
-        if (!messages || token !== loadToken) {
+        if (!loaded || token !== loadToken) {
             return;
         }
-        session.chats[item.file_name] = messages;
+        session.chats[item.file_name] = loaded.messages;
+        session.metas[item.file_name] = { mainChat: loaded.mainChat || null };
         done += 1;
         mounted.update({
             chats: session.chats,
-            activeFile: file,
-            activeDepth: depth,
+            metas: session.metas,
             loadingLabel: done < pending.length ? `Loaded ${done} of ${pending.length} other chats` : '',
             ...colors(),
         });

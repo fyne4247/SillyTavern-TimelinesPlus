@@ -9,7 +9,7 @@
 }
 
 #networkContainer {
-    background-color: var(--SmartThemeBlurTintColor, rgba(28, 26, 23, 0.92));
+    background-color: var(--SmartThemeBlurTintColor, #1c1a17);
     color: var(--SmartThemeBodyColor, #e7e1d6);
     padding: 16px 18px 12px;
     border: 1px solid var(--SmartThemeBorderColor, #6d6458);
@@ -34,10 +34,18 @@
 }
 
 .tlp-header {
-    display: grid;
-    grid-template-columns: minmax(160px, 280px) 1fr auto;
+    display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     align-items: center;
+}
+
+.tlp-file {
+    max-width: 100%;
+    background: transparent;
+    color: inherit;
+    border: 1px solid var(--SmartThemeBorderColor, #6d6458);
+    padding: 4px 6px;
 }
 
 .tlp-search {
@@ -79,11 +87,75 @@
     flex: 1;
 }
 
-.tlp-tree,
-.tlp-detail,
-.tlp-messages {
+.tlp-flow,
+.tlp-detail {
     min-height: 0;
     overflow: auto;
+}
+
+.tlp-flow-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.8fr);
+    gap: 10px;
+    align-items: start;
+    margin: 0 0 8px;
+}
+
+.tlp-card,
+.tlp-fork {
+    text-align: left;
+    color: inherit;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #e7e1d6) 6%, transparent);
+    border: 1px solid var(--SmartThemeBorderColor, #6d6458);
+    padding: 8px 10px;
+    cursor: pointer;
+    width: 100%;
+}
+
+.tlp-card {
+    border-left-width: 3px;
+}
+
+.tlp-card.is-user {
+    border-left-color: var(--tlp-user, #8fb4d4);
+}
+
+.tlp-card.is-current {
+    border-color: var(--SmartThemeQuoteColor, #c4a46a);
+}
+
+.tlp-card.is-dim {
+    opacity: 0.4;
+}
+
+.tlp-card-text {
+    white-space: pre-wrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.tlp-fork {
+    border-style: dashed;
+}
+
+.tlp-fork-ends {
+    opacity: 0.9;
+}
+
+.tlp-swipe-note {
+    margin-top: 4px;
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+.tlp-card-tail {
+    visibility: hidden;
+    min-height: 1px;
+    border: none;
+    background: none;
+    padding: 0;
 }
 
 .tlp-segment {
@@ -200,8 +272,8 @@
 }
 
 @media (max-width: 800px) {
-    .tlp-header,
     .tlp-body,
+    .tlp-flow-row,
     .tlp-message,
     .tlp-row {
         grid-template-columns: 1fr;

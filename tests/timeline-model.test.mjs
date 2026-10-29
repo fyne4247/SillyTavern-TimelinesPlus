@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
     GRAPH_WINDOW,
+    buildFlow,
     buildTimeline,
     graphElements,
     graphRangeForSegment,
@@ -163,6 +164,41 @@ test('graph window stays inside a long segment and neighbor branch walks forks',
     const next = neighborBranch(timeline, 'a.jsonl', 0, 1);
     assert.ok(next);
     assert.ok(next.depthStart >= 10 || next.files.length === 1);
+});
+
+test('a branch that stops is still a fork on the longer chat', () => {
+    const stem = chain(10, 'stem');
+    const chats = {
+        'parent.jsonl': stem.concat(chain(5, 'more')),
+        'branch.jsonl': stem.map(message => ({ ...message })),
+        'unrelated.jsonl': chain(4, 'other'),
+    };
+    const flow = buildFlow(chats, 'parent.jsonl', {
+        'branch.jsonl': { mainChat: 'parent' },
+    });
+    assert.deepEqual(flow.others, ['unrelated.jsonl']);
+    const ended = flow.forks.find(fork => fork.file === 'branch.jsonl');
+    assert.ok(ended);
+    assert.equal(ended.kind, 'ends');
+    assert.equal(ended.anchor, 9);
+
+    const fromBranch = buildFlow(chats, 'branch.jsonl');
+    const cont = fromBranch.forks.find(fork => fork.file === 'parent.jsonl');
+    assert.equal(cont.kind, 'continues');
+    assert.equal(cont.anchor, 10);
+});
+
+test('a real split hangs off the first message that differs', () => {
+    const stem = chain(4, 'stem');
+    const chats = {
+        'parent.jsonl': stem.concat(chain(3, 'parent')),
+        'fork.jsonl': stem.map(message => ({ ...message })).concat(chain(2, 'fork')),
+    };
+    const flow = buildFlow(chats, 'parent.jsonl');
+    const fork = flow.forks.find(item => item.file === 'fork.jsonl');
+    assert.equal(fork.kind, 'diverges');
+    assert.equal(fork.anchor, 4);
+    assert.match(fork.preview, /^fork-0/);
 });
 
 test('Papa, Rabbit, and Luna fixtures', () => {

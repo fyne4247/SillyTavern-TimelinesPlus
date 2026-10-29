@@ -28,7 +28,6 @@
     <div id="networkContainer">
         <div id="tlpRoot" class="tlp-root"></div>
     </div>
-    <script src="../cytoscape.min.js"></script>
     <script type="module">
         import { mountTimeline } from '../tl_view.js';
 
@@ -70,7 +69,6 @@
                     .replaceAll('>', '&gt;');
                 return escaped.replaceAll('\n', '<br>');
             },
-            cytoscape: (options) => (typeof cytoscape === 'function' ? cytoscape(options) : null),
             onOpen: (file, depth) => console.log('open', file, depth),
             onFork: (file, depth, swipeId) => console.log('fork', file, depth, swipeId),
             onEdit: (file, depth) => console.log('edit', file, depth),
@@ -83,7 +81,7 @@
             activeFile: active,
             activeDepth: chats[active].length - 1,
             loadingLabel: '',
-            expandActive: true,
+            scrollToActive: true,
             userColor: '#8fb4d4',
             charColor: '#d8d2c8',
         });
