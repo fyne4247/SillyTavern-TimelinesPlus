@@ -1,0 +1,5 @@
+# Local SillyTavern chat copies used as fixtures. Not part of the extension.
+fixtures/chats/
+
+# Browser check output. Can contain chat text.
+.playwright-mcp/

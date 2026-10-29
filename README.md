@@ -8,10 +8,11 @@ Think *Loom* [[1]](https://generative.ink/posts/loom-interface-to-the-multiverse
 
 ## Features
 
-- Display all chats with the current character. Chat messages with the same content are shown as a single node on the timeline.
-- Search all current character message content with realtime fulltext filtering.
-- Theming based on UI theme or custom theme.
-- Branch your chat from any chat or swipe.
+- A top-down tree of the current character's chats. A run of messages with no fork is one row. The same text at the same depth, in any number of files, is one row.
+- The open chat is on screen immediately. Other chat files load behind it.
+- Search is still a fragment search: whitespace-separated pieces, all of them required, order ignored.
+- Graph draws one depth window with positions taken from the message number. It does not run a graph solver over the whole archive.
+- Open, fork, edit, and checkpoint from a message. Edit and checkpoint hand the work to SillyTavern.
 
 ## Installation and Usage
 
@@ -22,57 +23,16 @@ Use ST's inbuilt extension installer.
 ### Usage
 
 - Settings: *Extensions > Timelines*
-- Open the timeline view: *Extensions > Timelines > View Timeline*
+- Open the timeline: *Extensions > Timelines > Show Timeline*
 - Slash commands:
-  - `/tl` - Open the timeline view (same as pressing the *View Timeline* button)
-  - `/tl r` - Refresh the timeline graph
+  - `/tl` opens the timeline
+  - `/tl r` drops the in-memory file cache and reads every chat again
 
-For convenient one-click access, bind the `/tl` command to a custom Quick Reply button. A useful short label is "⏳" (U+23F3, HOURGLASS WITH FLOWING SAND).
+The tree opens on the current message. Show messages on a row to page through that run, 40 at a time. Swipes are listed under the message they belong to. Graph draws that run when it is short, or the last 80 messages when it is long.
 
-- *Nodes with swipes* appear with a halo around them.
-  - There is also a setting to make them subtly larger.
-- *Checkpoint nodes* appear with a colored ring around them.
-  - If using the UI theme, the ring is a golden yellow.
-  - If using a custom theme, the color is configurable.
-- *Checkpoint paths* are colored accordingly, and are shown in the legend.
-  - The checkpoint color is random, but determined from the checkpoint name.
-  - A checkpoint is detected only when there is an intact checkpoint link in the chat file that originated the checkpoint. Dead links are ignored.
-- The identical content auto-merge only combines messages at the same depth (sequential message number in the chat).
-  - Thus the graph is always [acyclic](https://en.wikipedia.org/wiki/Directed_acyclic_graph), even if you use the same canned *Quick Reply* at multiple points in the same chat.
-  - But chats that use the same *Quick Reply* at the same depth will all be routed through the node that represents that quick reply at that depth.
-  - The same occurs if you send e.g. just "Thanks!", and that happens to be at the same chat depth as an earlier "Thanks!" in some other timeline.
+Previous branch and next branch move between forks and checkpoints. Search hides runs that do not contain every fragment. For example, `ear xam oop` matches a message that contains those pieces in any order.
 
-Actions:
-
-- *Opening the timeline view* auto-zooms to the current chat, and flashes the last node *in that chat* to clearly show it on the graph.
-  - This might not be the latest node on the timeline, if there is another chat that still continues after that point.
-  - There is also a button to zoom to the current chat.
-- *Hovering over a node* shows a short preview of the message text, and highlights all of its incoming and outgoing edges.
-- *Long-pressing a node* with swipes reveals the swipes on the graph.
-  - The timeline view allows you to see and access swipes also on previous messages, not just the last one.
-  - There is also a *Toggle swipes* button to reveal/hide swipes for the whole graph.
-  - There is a setting to *Auto-expand Swipes* when the timeline view first opens, and when the graph is refreshed.
-- *Clicking a node* opens a full info panel about it.
-  - The panel has buttons to go to that message in any of the chats it is part of, or to create a new chat branch starting from that message.
-  - On a swipe node, if the swipe is not on the last message in that particular chat timeline, it is not possible to go to the swipe without creating a new branch.
-    - In this situation, the button to go to the message is grayed out, but the button to create a branch is available.
-- *Double-clicking a node* goes straight to the message.
-  - If the same message appears in multiple chat files, one of them is picked automatically. Usually this picks the most recent chat.
-    - When this happens, a notification is shown with the chat file name.
-    - If it's not the chat file you wanted, just open the timelines view again, click on the node, and pick the correct chat file explicitly from the full info panel.
-  - If you double-click a swipe node, what happens depends on whether it is the last node in that particular chat.
-    - On the last node, double-clicking a swipe opens the original chat, goes to the last message, and switches to that swipe.
-    - On a non-last node, double-clicking automatically creates a new branch, opens the new chat, goes to the (now-last) message, and switches to that swipe.
-- *Hovering over an edge* highlights that edge.
-- *Clicking an edge* navigates to its far end (as measured from the click position), and zooms into the node there.
-- *Clicking a legend entry* highlights it and zooms into it. Clicking the same entry again removes the highlight, and zooms out.
-- *Focusing the fulltext search* or *typing into the fulltext search* highlights and zooms to the search results in realtime. When no match, or if you clear the search, it zooms out.
-- The fulltext search is an *incremental fragment search* a.k.a. *swoop*. For example, the query `ear xam oop` would match this line (and in this document, only this line).
-  - A *swoop* is an AND search using whitespace-delimited *fragments*. Their ordering in the query does not matter.
-  - Swoop is a highly efficient way to quickly navigate large collections of text, inspired by the *HELM Swoop* function of the *Helm* package in *Emacs*.
-  - You can still use the Timelines search like you would a classical substring search (but that's not taking advantage of swoop's full potential).
-
-Hover tooltips describe available actions at any node or edge.
+Open uses the open chat when the row is shared by several files. Fork creates a SillyTavern branch. On a swipe that is not the last message of its file, fork is how you reach it, because SillyTavern only keeps swipes on the last message. Edit opens SillyTavern's message editor. Checkpoint asks for a name, opens that message, and creates the checkpoint there. Delete removes a chat file that is not the one currently open, after a confirm that names the file.
 
 ### Checkpoints
 

@@ -1,264 +1,216 @@
-/* The invisible outer modal, covering the whole viewport */
 .modal {
     display: none;
     position: fixed;
     z-index: 9999;
-    /* Increase this value as needed */
     left: 0;
     top: 0;
     width: 100vw;
-    /* covers the entire width of the viewport */
     height: 100vh;
-    /* covers the entire height of the viewport */
 }
 
-/* The inner modal, containing the actual Timeslines window */
 #networkContainer {
-    background-color: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(var(--SmartThemeBlurStrength));
-    background-color: var(--SmartThemeBlurTintColor);
-    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength));
-    text-shadow: 0px 0px calc(var(--shadowWidth) * 1px) var(--SmartThemeShadowColor);
-    padding: 20px;
-    border: 1px solid #888;
-    width: 90vw;
-    height: 90vh;
+    background-color: var(--SmartThemeBlurTintColor, rgba(28, 26, 23, 0.92));
+    color: var(--SmartThemeBodyColor, #e7e1d6);
+    padding: 16px 18px 12px;
+    border: 1px solid var(--SmartThemeBorderColor, #6d6458);
+    width: min(1100px, 94vw);
+    height: min(860px, 92vh);
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
     overflow: hidden;
-}
-
-.graph-container {  /* Top-level container for the timeline graph and the legend */
-    height: 100%;
-    width: 100%;
-    overflow: hidden;
-}
-
-#timelinesDiagramDiv {  /* The container for the timeline graph */
-    /* Make the diagram take the full space of the modal content */
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-}
-
-.legend-bottom-right {  /* The container for the legend */
-    position: absolute;
-    bottom: 10px; /* Offset from the bottom */
-    right: 10px; /* Offset from the right */
-    z-index: 10; /* Ensures it stays on top */
-    overflow-y: scroll;
-    max-height: 90%;
-    border: 1px solid var(--SmartThemeBorderColor);
-    padding: 5px;
-    border-radius: 5px;
-    background-color: rgba(0, 0, 0, 0.7); /* Translucent background */
-    backdrop-filter: blur(var(--SmartThemeBlurStrength));
-}
-
-.legend-item {
     display: flex;
+    flex-direction: column;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+.tlp-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    gap: 10px;
+}
+
+.tlp-header {
+    display: grid;
+    grid-template-columns: minmax(160px, 280px) 1fr auto;
+    gap: 10px;
     align-items: center;
-    margin: 8px 0;
 }
 
-.legend-symbol {
-    width: 25px;
-    height: 25px;
-    border-radius: 50%; /* Makes it a circle */
-    margin-right: 10px;
+.tlp-search {
+    width: 100%;
+    background: transparent;
+    color: inherit;
+    border: none;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #6d6458);
+    padding: 6px 2px;
 }
 
-.legend-text {
+.tlp-status,
+.tlp-meta,
+.tlp-files,
+.tlp-preview {
+    font-size: 0.92em;
+    opacity: 0.85;
+}
+
+.tlp-tools,
+.tlp-actions,
+.tlp-graph-bar,
+.tlp-pager {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.tlp-button {
+    width: auto;
+}
+
+.tlp-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.8fr);
+    gap: 12px;
+    min-height: 0;
     flex: 1;
 }
 
-.active-legend {
-    box-shadow: 0px 0px 8px rgba(0, 0, 0, 0.1), /* existing shadow */
-                inset 0 0 0 2px rgba(0, 0, 0, 0.3); /* simulating the border */
-    border-radius: 5px;
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-/* The Close Button */
-.close {
-    color: #aaaaaa;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    z-index: 3;
-    position: relative;
-    background: none;
-        border: none;
-        padding: 0;
-}
-.close:hover {
-    color: red;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-/* The Expand (Toggle Swipes) Button */
-.expand {
-    color: #aaaaaa;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    z-index: 3;
-    position: relative;
-    background: none;
-        border: none;
-        padding: 0;
-        padding-right: 10px;
-}
-.expand:hover {
-    color: #808080;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-/* The Rotate Button */
-.rotate {
-    color: #aaaaaa;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    z-index: 3;
-    position: relative;
-    background: none;
-        border: none;
-        padding: 0;
-        padding-right: 10px;
-}
-.rotate:hover {
-    color: #808080;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-/* The Reload Button */
-.reload {
-    color: #aaaaaa;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    z-index: 3;
-    position: relative;
-    background: none;
-    border: none;
-    padding: 0;
-    padding-right: 10px;
-}
-.reload:hover {
-    color: #808080;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-/* The Zoom to Fit Button */
-.zoomtofit {
-    color: #aaaaaa;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    z-index: 3;
-    position: relative;
-    background: none;
-    border: none;
-    padding: 0;
-    padding-right: 10px;
-}
-.zoomtofit:hover {
-    color: #808080;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-/* The Zoom to Current Button */
-.zoomtocurrent {
-    color: #aaaaaa;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    z-index: 3;
-    position: relative;
-    background: none;
-    border: none;
-    padding: 0;
-    padding-right: 10px;
-}
-.zoomtocurrent:hover {
-    color: #808080;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.hidden {
-    display: none;
-}
-
-#transparent-search {  /* The text search field */
-    background-color: transparent;
-    border: none;
-    outline: none;
-    color: white;
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    width: 200px;
-    font-size: 16px;
-    z-index: 10;
-}
-
-.timelines-text-search-match {
-    font-weight: bold;
-    color: red;
-}
-
-.tippy-box {  /* Pretty much everything rendered by Cytoscape or Tippy */
-    background-color: rgba(255, 255, 255, 0.7);  /* TODO: Overridden by Cytoscape theme, so we don't actually need this here? (same for some other `background-color` items) */
-    backdrop-filter: blur(var(--SmartThemeBlurStrength));
-    background-color: var(--SmartThemeBlurTintColor);
-    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength));
-    text-shadow: 0px 0px calc(var(--shadowWidth) * 1px) var(--SmartThemeShadowColor);
-    padding: 20px;
-    border: 1px solid var(--SmartThemeShadowColor);
-    max-width: 80vw;
-    width: auto; /* To make it responsive */
-    max-height: 80vh;
-    height: auto;
-    /* overflow: auto; */
-    border-radius: 4px; /* Optional: if you want rounded corners */
-}
-
-.tippy-box button:hover {
-    background-color: #0056b3;
-}
-
-.tap_tippy_content {  /* The full info panel */
-    max-height: 75vh;
-    max-width: 80vw;
+.tlp-tree,
+.tlp-detail,
+.tlp-messages {
+    min-height: 0;
     overflow: auto;
 }
 
-.tippy-box .menu_div {  /* Navigation buttons section in the full info panel */
-    max-height: 45vh;
-    overflow-y: auto;
+.tlp-segment {
+    margin-left: calc(var(--tlp-nest, 0) * 14px);
+    border-left: 2px solid color-mix(in srgb, var(--SmartThemeBodyColor, #e7e1d6) 22%, transparent);
+    padding-left: 8px;
+    margin-bottom: 6px;
 }
 
-.tippy-box .menu_button {  /* Each individual navigation button in the full info panel */
-    width: 100%;
+.tlp-segment.is-current {
+    border-left-color: var(--SmartThemeQuoteColor, #c4a46a);
 }
 
-.tippy-box .name_text {
-    font-weight: bold;
+.tlp-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    padding: 4px 2px 8px;
 }
 
-.tippy-box .mes_text {  /* Message content section in the full info panel */
-    max-height: 50vh;
-    max-width: 70vw;
-    overflow-y: auto;
+.tlp-row:focus {
+    outline: 1px solid var(--SmartThemeQuoteColor, #c4a46a);
+    outline-offset: 2px;
+}
+
+.tlp-expand {
+    min-width: 2em;
+}
+
+.tlp-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.tlp-badge {
+    border: 1px solid var(--SmartThemeQuoteColor, #c4a46a);
+    padding: 0 6px;
+    font-size: 0.85em;
+}
+
+.tlp-badge-check {
+    border-color: var(--SmartThemeBorderColor, #6d6458);
+}
+
+.tlp-message,
+.tlp-swipe {
+    display: grid;
+    grid-template-columns: 7em minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    padding: 3px 0;
+}
+
+.tlp-message.is-current .tlp-message-text {
+    font-weight: 600;
+}
+
+.tlp-who.is-user {
+    color: var(--tlp-user, var(--SmartThemeQuoteColor, #8fb4d4));
+}
+
+.tlp-message-text {
+    text-align: left;
+    background: none;
+    border: none;
+    color: inherit;
+    padding: 0;
+    cursor: pointer;
+}
+
+.tlp-swipes {
+    grid-column: 2 / -1;
+    margin-left: 8px;
+}
+
+.tlp-detail {
+    border-left: 1px solid var(--SmartThemeBorderColor, #6d6458);
+    padding-left: 12px;
+}
+
+.tlp-detail-body {
+    white-space: pre-wrap;
+    margin-top: 10px;
+    line-height: 1.45;
+}
+
+.tlp-detail-actions {
+    margin: 8px 0;
+}
+
+.tlp-graph {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    gap: 8px;
+}
+
+.tlp-cy {
+    flex: 1;
+    min-height: 240px;
+    border: 1px solid var(--SmartThemeBorderColor, #6d6458);
+}
+
+.tlp-empty {
+    margin: 8px 0;
+}
+
+.tlp-graph-pick {
+    flex-basis: 100%;
+}
+
+@media (max-width: 800px) {
+    .tlp-header,
+    .tlp-body,
+    .tlp-message,
+    .tlp-row {
+        grid-template-columns: 1fr;
+    }
+
+    .tlp-detail {
+        border-left: none;
+        border-top: 1px solid var(--SmartThemeBorderColor, #6d6458);
+        padding-left: 0;
+        max-height: 38vh;
+    }
 }

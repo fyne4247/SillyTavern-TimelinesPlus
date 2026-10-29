@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Timelines preview</title>
+    <link rel="stylesheet" href="../tl_style.css">
+    <style>
+        :root {
+            --SmartThemeBlurTintColor: #1c1a17;
+            --SmartThemeBodyColor: #e7e1d6;
+            --SmartThemeBorderColor: #6d6458;
+            --SmartThemeQuoteColor: #c4a46a;
+        }
+        html, body { margin: 0; height: 100%; background: #141210; color: #e7e1d6; font: 16px/1.4 Georgia, serif; }
+        #stage { height: 100%; }
+        #networkContainer { position: static; transform: none; width: auto; height: 100%; top: auto; left: auto; }
+        .menu_button {
+            background: transparent;
+            color: inherit;
+            border: 1px solid #6d6458;
+            padding: 4px 8px;
+            cursor: pointer;
+            font: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div id="networkContainer">
+        <div id="tlpRoot" class="tlp-root"></div>
+    </div>
+    <script src="../cytoscape.min.js"></script>
+    <script type="module">
+        import { mountTimeline } from '../tl_view.js';
+
+        const files = [
+            'Papa/Papa Branch 2.jsonl',
+            'Papa/Papa - Compiled.jsonl',
+            'Papa/Papa (Bad Ending - New Fish).jsonl',
+            'Luna Walcott-Fisher/The Lunaverse.jsonl',
+        ];
+
+        function parseChat(text) {
+            const messages = [];
+            for (const line of text.split('\n')) {
+                if (!line.trim()) continue;
+                const row = JSON.parse(line);
+                if (row && Object.prototype.hasOwnProperty.call(row, 'mes')) {
+                    messages.push(row);
+                }
+            }
+            return messages;
+        }
+
+        const chats = {};
+        for (const file of files) {
+            const response = await fetch(`../fixtures/chats/${encodeURI(file)}`);
+            if (!response.ok) {
+                throw new Error(`Missing fixture ${file}`);
+            }
+            const name = file.split('/').pop();
+            chats[name] = parseChat(await response.text());
+        }
+
+        const active = 'Papa Branch 2.jsonl';
+        const view = mountTimeline(document.getElementById('tlpRoot'), {
+            formatMessage: (message) => {
+                const escaped = String(message.mes ?? '')
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;');
+                return escaped.replaceAll('\n', '<br>');
+            },
+            cytoscape: (options) => (typeof cytoscape === 'function' ? cytoscape(options) : null),
+            onOpen: (file, depth) => console.log('open', file, depth),
+            onFork: (file, depth, swipeId) => console.log('fork', file, depth, swipeId),
+            onEdit: (file, depth) => console.log('edit', file, depth),
+            onCheckpoint: (file, depth) => console.log('checkpoint', file, depth),
+            onDelete: (file) => console.log('delete', file),
+            onClose: () => console.log('close'),
+        });
+        view.update({
+            chats,
+            activeFile: active,
+            activeDepth: chats[active].length - 1,
+            loadingLabel: '',
+            expandActive: true,
+            userColor: '#8fb4d4',
+            charColor: '#d8d2c8',
+        });
+    </script>
+</body>
+</html>

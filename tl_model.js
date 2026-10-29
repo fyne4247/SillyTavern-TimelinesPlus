@@ -1,0 +1,569 @@
+/**
+ * Branch index and preset graph geometry for the timeline.
+ * No SillyTavern imports, no Cytoscape, no Dagre.
+ * Depth is the message index. A segment is a run of depths where the same
+ * set of files still agrees on the text.
+ */
+
+export const GRAPH_WINDOW = 80;
+export const GRAPH_SEGMENT_LIMIT = 250;
+export const PAGE_SIZE = 40;
+
+/**
+ * @param {unknown} mes
+ * @returns {string}
+ */
+export function normalizeMessageText(mes) {
+    return String(mes ?? '').replace(/\r\n/g, '\n');
+}
+
+/**
+ * @param {string} query
+ * @returns {string[]}
+ */
+export function queryFragments(query) {
+    const parts = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return [...new Set(parts)];
+}
+
+/**
+ * @param {string} text
+ * @param {string[]} fragments lowercased
+ * @returns {boolean}
+ */
+export function textMatchesFragments(text, fragments) {
+    if (!fragments.length) {
+        return true;
+    }
+    const hay = String(text ?? '').toLowerCase();
+    return fragments.every(fragment => hay.includes(fragment));
+}
+
+/**
+ * @param {string} fileName
+ * @returns {string}
+ */
+export function displayFileName(fileName) {
+    return String(fileName ?? '').replace(/\.jsonl$/i, '');
+}
+
+/**
+ * @param {string} text
+ * @param {number} max
+ * @returns {string}
+ */
+export function previewText(text, max = 90) {
+    const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+    if (flat.length <= max) {
+        return flat;
+    }
+    return `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * @param {object|null|undefined} message
+ * @param {Set<string>} fileSet
+ * @returns {string|null}
+ */
+function liveBookmarkName(message, fileSet) {
+    const link = message?.extra?.bookmark_link;
+    if (!link || typeof link !== 'string') {
+        return null;
+    }
+    const asFile = link.endsWith('.jsonl') ? link : `${link}.jsonl`;
+    if (!fileSet.has(asFile) && !fileSet.has(link)) {
+        return null;
+    }
+    return link;
+}
+
+/**
+ * @param {Record<string, object[]>} chats
+ * @returns {{ segments: object[], byId: Map<string, object>, roots: object[] }}
+ */
+export function buildTimeline(chats) {
+    const source = chats && typeof chats === 'object' ? chats : {};
+    const fileSet = new Set(
+        Object.keys(source).filter(name => Array.isArray(source[name]) && source[name].length > 0),
+    );
+    /** @type {object[]} */
+    const segments = [];
+    let nextId = 0;
+
+    /** @type {{ files: string[], depth: number, parentId: string|null }[]} */
+    const queue = [];
+    if (fileSet.size > 0) {
+        queue.push({ files: [...fileSet], depth: 0, parentId: null });
+    }
+
+    while (queue.length > 0) {
+        const job = queue.shift();
+        const alive = job.files.filter(file => job.depth < source[file].length);
+        if (alive.length === 0) {
+            continue;
+        }
+
+        /** @type {Map<string, string[]>} */
+        const groups = new Map();
+        for (const file of alive) {
+            const key = normalizeMessageText(source[file][job.depth]?.mes);
+            const list = groups.get(key);
+            if (list) {
+                list.push(file);
+            } else {
+                groups.set(key, [file]);
+            }
+        }
+
+        for (const group of groups.values()) {
+            let end = job.depth + 1;
+            const bookmarkAtStart = liveBookmarkName(source[group[0]][job.depth], fileSet);
+            if (!bookmarkAtStart) {
+                while (group.every(file => end < source[file].length)) {
+                    const text = normalizeMessageText(source[group[0]][end]?.mes);
+                    const agreed = group.every(file => normalizeMessageText(source[file][end]?.mes) === text);
+                    if (!agreed) {
+                        break;
+                    }
+                    end += 1;
+                    if (liveBookmarkName(source[group[0]][end - 1], fileSet)) {
+                        break;
+                    }
+                }
+            }
+
+            const head = source[group[0]][job.depth];
+            const tail = source[group[0]][end - 1];
+            const checkpointName = liveBookmarkName(tail, fileSet);
+            let swipeMessages = 0;
+            for (let depth = job.depth; depth < end; depth += 1) {
+                const anySwipe = group.some(file => {
+                    const swipes = source[file][depth]?.swipes;
+                    return Array.isArray(swipes) && swipes.length > 1;
+                });
+                if (anySwipe) {
+                    swipeMessages += 1;
+                }
+            }
+
+            const segment = {
+                id: `s${nextId}`,
+                parentId: job.parentId,
+                childIds: [],
+                files: group.slice(),
+                depthStart: job.depth,
+                depthEnd: end,
+                lane: 0,
+                preview: previewText(head?.mes),
+                tailPreview: previewText(tail?.mes),
+                headName: head?.name || '',
+                checkpoint: checkpointName
+                    ? { name: checkpointName, depth: end - 1, sourceFile: group[0] }
+                    : null,
+                swipeMessages,
+            };
+            nextId += 1;
+            segments.push(segment);
+
+            const cont = group.filter(file => end < source[file].length);
+            if (cont.length > 0) {
+                queue.push({ files: cont, depth: end, parentId: segment.id });
+            }
+        }
+    }
+
+    const roots = assignLanes(segments, null);
+    const byId = new Map(segments.map(segment => [segment.id, segment]));
+    return { segments, byId, roots };
+}
+
+/**
+ * @param {object[]} segments
+ * @param {string|null} activeFile
+ * @returns {object[]} roots, active file first
+ */
+function assignLanes(segments, activeFile) {
+    const children = new Map();
+    const roots = [];
+    for (const segment of segments) {
+        if (!segment.parentId) {
+            roots.push(segment);
+        } else {
+            const list = children.get(segment.parentId);
+            if (list) {
+                list.push(segment);
+            } else {
+                children.set(segment.parentId, [segment]);
+            }
+        }
+    }
+
+    const rank = (segment) => {
+        const current = activeFile && segment.files.includes(activeFile) ? 0 : 1;
+        return [current, segment.files[0] || ''];
+    };
+    const byRank = (a, b) => {
+        const [aCurrent, aName] = rank(a);
+        const [bCurrent, bName] = rank(b);
+        if (aCurrent !== bCurrent) {
+            return aCurrent - bCurrent;
+        }
+        return aName.localeCompare(bName);
+    };
+    for (const list of children.values()) {
+        list.sort(byRank);
+    }
+    roots.sort(byRank);
+
+    let cursor = 0;
+    const place = (segment) => {
+        const kids = children.get(segment.id) || [];
+        segment.childIds = kids.map(kid => kid.id);
+        if (kids.length === 0) {
+            segment.lane = cursor;
+            cursor += 1;
+            return;
+        }
+        for (const kid of kids) {
+            place(kid);
+        }
+        segment.lane = kids[0].lane;
+    };
+    for (const root of roots) {
+        place(root);
+    }
+    return roots;
+}
+
+/**
+ * Re-rank with the open chat on the spine. `buildTimeline` does not know
+ * which file is open, so the view calls this before painting.
+ * @param {{ segments: object[] }} timeline
+ * @param {string|null} activeFile
+ */
+export function preferActiveFile(timeline, activeFile) {
+    if (!timeline) {
+        return timeline;
+    }
+    timeline.roots = assignLanes(timeline.segments, activeFile);
+    return timeline;
+}
+
+/**
+ * @param {object} segment
+ * @returns {string}
+ */
+export function segmentKey(segment) {
+    return `${segment.depthStart}|${segment.files.slice().sort().join('|')}`;
+}
+
+/**
+ * @param {{ segments: object[], byId: Map<string, object> }} timeline
+ * @param {string|null} file
+ * @param {number} depth
+ * @returns {object|null}
+ */
+export function segmentAt(timeline, file, depth) {
+    if (!timeline || !file) {
+        return null;
+    }
+    let found = null;
+    for (const segment of timeline.segments) {
+        if (segment.files.includes(file) && depth >= segment.depthStart && depth < segment.depthEnd) {
+            if (!found || segment.depthStart >= found.depthStart) {
+                found = segment;
+            }
+        }
+    }
+    return found;
+}
+
+/**
+ * @param {{ segments: object[], byId: Map<string, object> }} timeline
+ * @returns {object[]}
+ */
+export function preorder(timeline) {
+    if (!timeline) {
+        return [];
+    }
+    /** @type {object[]} */
+    const out = [];
+    const walk = (segment) => {
+        out.push(segment);
+        for (const childId of segment.childIds) {
+            const child = timeline.byId.get(childId);
+            if (child) {
+                walk(child);
+            }
+        }
+    };
+    for (const root of timeline.roots) {
+        walk(root);
+    }
+    return out;
+}
+
+/**
+ * Branch points: a segment whose parent has another child, or a checkpoint.
+ * @param {{ segments: object[], byId: Map<string, object> }} timeline
+ * @returns {object[]}
+ */
+export function branchPoints(timeline) {
+    return preorder(timeline).filter(segment => {
+        if (segment.checkpoint) {
+            return true;
+        }
+        if (!segment.parentId) {
+            return timeline.roots.length > 1;
+        }
+        const parent = timeline.byId.get(segment.parentId);
+        return Boolean(parent && parent.childIds.length > 1);
+    });
+}
+
+/**
+ * @param {{ segments: object[], byId: Map<string, object> }} timeline
+ * @param {string|null} file
+ * @param {number} depth
+ * @param {number} direction -1 or 1
+ * @returns {object|null}
+ */
+export function neighborBranch(timeline, file, depth, direction) {
+    const points = branchPoints(timeline);
+    if (points.length === 0) {
+        return null;
+    }
+    const here = segmentAt(timeline, file, depth);
+    const index = here ? points.findIndex(point => point.id === here.id) : -1;
+    if (index === -1) {
+        if (direction > 0) {
+            return points.find(point => point.depthStart > depth) || null;
+        }
+        for (let i = points.length - 1; i >= 0; i -= 1) {
+            if (points[i].depthEnd <= depth) {
+                return points[i];
+            }
+        }
+        return null;
+    }
+    const next = index + direction;
+    if (next < 0 || next >= points.length) {
+        return null;
+    }
+    return points[next];
+}
+
+/**
+ * @param {object} segment
+ * @param {Record<string, object[]>} chats
+ * @param {string[]} fragments
+ * @returns {number[]}
+ */
+export function matchingDepths(segment, chats, fragments) {
+    if (!fragments.length) {
+        return [];
+    }
+    /** @type {number[]} */
+    const hits = [];
+    const file = segment.files[0];
+    const messages = chats[file] || [];
+    for (let depth = segment.depthStart; depth < segment.depthEnd; depth += 1) {
+        const message = messages[depth];
+        if (!message) {
+            continue;
+        }
+        const parts = [normalizeMessageText(message.mes)];
+        if (Array.isArray(message.swipes)) {
+            for (const swipe of message.swipes) {
+                parts.push(normalizeMessageText(swipe));
+            }
+        }
+        if (parts.some(part => textMatchesFragments(part, fragments))) {
+            hits.push(depth);
+        }
+    }
+    return hits;
+}
+
+/**
+ * @param {{ segments: object[], byId: Map<string, object>, roots: object[] }} timeline
+ * @param {Record<string, object[]>} chats
+ * @param {string} query
+ * @returns {Set<string>|null} segment ids to show, or null when the query is empty
+ */
+export function visibleSegmentIds(timeline, chats, query) {
+    const fragments = queryFragments(query);
+    if (!fragments.length || !timeline) {
+        return null;
+    }
+    /** @type {Set<string>} */
+    const visible = new Set();
+    for (const segment of timeline.segments) {
+        if (matchingDepths(segment, chats, fragments).length > 0) {
+            let current = segment;
+            while (current) {
+                visible.add(current.id);
+                current = current.parentId ? timeline.byId.get(current.parentId) : null;
+            }
+        }
+    }
+    return visible;
+}
+
+/**
+ * File to act on for a shared segment: the open chat when it is one of them.
+ * @param {object} segment
+ * @param {string|null} activeFile
+ * @returns {string}
+ */
+export function actionFile(segment, activeFile) {
+    if (activeFile && segment.files.includes(activeFile)) {
+        return activeFile;
+    }
+    return segment.files[0];
+}
+
+/**
+ * Preset Cytoscape elements for a depth window. One node per distinct text
+ * at a depth, one edge per distinct hop. Positions are the layout.
+ *
+ * @param {Record<string, object[]>} chats
+ * @param {number} depthStart inclusive
+ * @param {number} depthEnd exclusive
+ * @param {{ xGap?: number, yGap?: number }} [options]
+ * @returns {{ nodes: object[], edges: object[], depthStart: number, depthEnd: number }}
+ */
+export function graphElements(chats, depthStart, depthEnd, options = {}) {
+    const xGap = options.xGap ?? 72;
+    const yGap = options.yGap ?? 36;
+    const source = chats && typeof chats === 'object' ? chats : {};
+    const start = Math.max(0, depthStart | 0);
+    const end = Math.max(start, depthEnd | 0);
+
+    /** @type {Map<string, string>} */
+    const nodeAt = new Map();
+    /** @type {object[]} */
+    const nodes = [];
+    /** @type {Map<string, object>} */
+    const edges = new Map();
+    /** @type {Map<number, Map<string, number>>} */
+    const laneAtDepth = new Map();
+
+    const files = Object.keys(source).filter(name => Array.isArray(source[name]));
+
+    for (let depth = start; depth < end; depth += 1) {
+        for (const file of files) {
+            const message = source[file][depth];
+            if (!message) {
+                continue;
+            }
+            const text = normalizeMessageText(message.mes);
+            const nodeKey = `${depth}\u0000${text}`;
+            if (!nodeAt.has(nodeKey)) {
+                const lanes = laneAtDepth.get(depth) || new Map();
+                laneAtDepth.set(depth, lanes);
+                const lane = lanes.size;
+                lanes.set(nodeKey, lane);
+                const id = `n${nodes.length}`;
+                nodeAt.set(nodeKey, id);
+                nodes.push({
+                    group: 'nodes',
+                    data: {
+                        id,
+                        depth,
+                        msg: text,
+                        name: message.name || '',
+                        is_user: Boolean(message.is_user),
+                        is_system: Boolean(message.is_system),
+                        files: [file],
+                    },
+                    position: {
+                        x: lane * xGap,
+                        y: (depth - start) * yGap,
+                    },
+                });
+            } else {
+                const id = nodeAt.get(nodeKey);
+                const node = nodes.find(item => item.data.id === id);
+                if (node && !node.data.files.includes(file)) {
+                    node.data.files.push(file);
+                }
+            }
+
+            if (depth === start) {
+                continue;
+            }
+            const previous = source[file][depth - 1];
+            if (!previous) {
+                continue;
+            }
+            const previousKey = `${depth - 1}\u0000${normalizeMessageText(previous.mes)}`;
+            const sourceId = nodeAt.get(previousKey);
+            const targetId = nodeAt.get(nodeKey);
+            if (!sourceId || !targetId) {
+                continue;
+            }
+            const edgeKey = `${sourceId}->${targetId}`;
+            if (!edges.has(edgeKey)) {
+                edges.set(edgeKey, {
+                    group: 'edges',
+                    data: {
+                        id: `e${edges.size}`,
+                        source: sourceId,
+                        target: targetId,
+                    },
+                });
+            }
+        }
+    }
+
+    return {
+        nodes,
+        edges: [...edges.values()],
+        depthStart: start,
+        depthEnd: end,
+    };
+}
+
+/**
+ * @param {object} segment
+ * @param {number} activeDepth
+ * @param {string|null} activeFile
+ * @returns {{ depthStart: number, depthEnd: number, windowed: boolean }}
+ */
+export function graphRangeForSegment(segment, activeDepth, activeFile) {
+    const length = segment.depthEnd - segment.depthStart;
+    if (length <= GRAPH_SEGMENT_LIMIT) {
+        return { depthStart: segment.depthStart, depthEnd: segment.depthEnd, windowed: false };
+    }
+    const inside = activeFile
+        && segment.files.includes(activeFile)
+        && activeDepth >= segment.depthStart
+        && activeDepth < segment.depthEnd;
+    const anchor = inside ? activeDepth : segment.depthEnd - 1;
+    let depthEnd = Math.min(segment.depthEnd, anchor + 1);
+    let depthStart = Math.max(segment.depthStart, depthEnd - GRAPH_WINDOW);
+    depthEnd = Math.min(segment.depthEnd, depthStart + GRAPH_WINDOW);
+    return { depthStart, depthEnd, windowed: true };
+}
+
+/**
+ * @param {{ depthStart: number, depthEnd: number }} range
+ * @param {number} direction
+ * @param {number} boundStart
+ * @param {number} boundEnd
+ * @returns {{ depthStart: number, depthEnd: number }}
+ */
+export function shiftGraphRange(range, direction, boundStart, boundEnd) {
+    const span = Math.max(1, range.depthEnd - range.depthStart);
+    let depthStart = range.depthStart + (direction * span);
+    if (depthStart < boundStart) {
+        depthStart = boundStart;
+    }
+    let depthEnd = depthStart + span;
+    if (depthEnd > boundEnd) {
+        depthEnd = boundEnd;
+        depthStart = Math.max(boundStart, depthEnd - span);
+    }
+    return { depthStart, depthEnd };
+}
