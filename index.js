@@ -315,10 +315,121 @@ function slashCommandHandler(_, reload) {
     openTimeline(reload === 'r');
 }
 
+const TOP_BAR_ID = 'extensionTopBar';
+const TOP_BAR_NAME_ID = 'extensionTopBarChatName';
+const TOP_BAR_BUTTON_ID = 'tlp-topbar-button';
+const WAND_BUTTON_ID = 'tlp-wand-button';
+
+function timelineSettings() {
+    const settings = getContext().extensionSettings;
+    if (!settings.timeline || typeof settings.timeline !== 'object') {
+        settings.timeline = {};
+    }
+    if (typeof settings.timeline.showTopBarButton !== 'boolean') {
+        settings.timeline.showTopBarButton = true;
+    }
+    return settings.timeline;
+}
+
+function placeTopBarButton() {
+    const enabled = timelineSettings().showTopBarButton !== false;
+    const existing = document.getElementById(TOP_BAR_BUTTON_ID);
+    if (!enabled) {
+        existing?.remove();
+        return false;
+    }
+    const topBar = document.getElementById(TOP_BAR_ID);
+    if (!topBar) {
+        return false;
+    }
+    let button = existing;
+    if (!button) {
+        button = document.createElement('i');
+        button.id = TOP_BAR_BUTTON_ID;
+        button.className = 'fa-fw fa-solid fa-code-branch right_menu_button';
+        button.title = 'Timeline';
+        button.tabIndex = 0;
+        button.setAttribute('role', 'button');
+        button.addEventListener('click', () => {
+            if (button.classList.contains('not-in-chat')) {
+                return;
+            }
+            openTimeline(false);
+        });
+        button.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {
+                return;
+            }
+            event.preventDefault();
+            button.click();
+        });
+    }
+    const context = getContext();
+    button.classList.toggle('not-in-chat', !(context.characterId || context.groupId));
+    const chatName = document.getElementById(TOP_BAR_NAME_ID);
+    const anchor = chatName?.parentElement === topBar ? chatName : null;
+    if (button.parentElement !== topBar || button.nextElementSibling !== anchor) {
+        topBar.insertBefore(button, anchor);
+    }
+    return true;
+}
+
+function placeWandButton() {
+    if (document.getElementById(WAND_BUTTON_ID)) {
+        return true;
+    }
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu) {
+        return false;
+    }
+    const item = document.createElement('div');
+    item.id = WAND_BUTTON_ID;
+    item.className = 'list-group-item flex-container flexGap5';
+    const icon = document.createElement('div');
+    icon.className = 'fa-solid fa-code-branch extensionsMenuExtensionButton';
+    const label = document.createElement('span');
+    label.textContent = 'Timeline';
+    item.append(icon, label);
+    item.addEventListener('click', () => openTimeline(false));
+    menu.appendChild(item);
+    return true;
+}
+
+function installEntryPoints() {
+    placeWandButton();
+    if (timelineSettings().showTopBarButton === false) {
+        document.getElementById(TOP_BAR_BUTTON_ID)?.remove();
+        return;
+    }
+    if (placeTopBarButton()) {
+        return;
+    }
+    const sheld = document.getElementById('sheld');
+    if (!sheld || sheld.dataset.tlpTopBarWatch === '1') {
+        return;
+    }
+    sheld.dataset.tlpTopBarWatch = '1';
+    const observer = new MutationObserver(() => {
+        if (placeTopBarButton()) {
+            observer.disconnect();
+        }
+    });
+    observer.observe(sheld, { childList: true, subtree: true });
+}
+
 jQuery(async () => {
     const settingsHtml = await $.get(`${extensionFolderPath}timeline.html`);
     const getContainer = () => $(document.getElementById('timelines_container') ?? document.getElementById('extensions_settings'));
     getContainer().append(settingsHtml);
     $('#show_timeline_view').on('click', () => openTimeline(false));
+    $('#tl_top_bar_button').prop('checked', timelineSettings().showTopBarButton);
+    $('#tl_top_bar_button').on('input', () => {
+        timelineSettings().showTopBarButton = $('#tl_top_bar_button').prop('checked');
+        getContext().saveSettingsDebounced();
+        placeTopBarButton();
+    });
     registerSlashCommand('tl', slashCommandHandler, [], '/tl Show the timeline. "/tl r" reloads every chat file.', false, true);
+    installEntryPoints();
+    eventSource.on(event_types.APP_READY, installEntryPoints);
+    eventSource.on(event_types.CHAT_CHANGED, placeTopBarButton);
 });
