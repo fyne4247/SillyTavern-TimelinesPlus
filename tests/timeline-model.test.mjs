@@ -282,3 +282,18 @@ test('shared greetings do not connect independent chats; saved links connect the
     chats['independent.jsonl'][1].extra = { bookmark_link: 'parent' };
     assert.equal(familyOf(chats, 'independent.jsonl', metas).related.length, 5);
 });
+
+test('branch lanes alternate around the main path without sharing lanes', () => {
+    const chats = { 'main.jsonl': chain(10, 'stem') };
+    const metas = {};
+    for (let i = 0; i < 4; i += 1) {
+        const file = `branch-${i}.jsonl`;
+        chats[file] = chain(3 + i, 'stem').concat(chain(3, `tail-${i}`));
+        metas[file] = { mainChat: 'main' };
+    }
+    const chart = buildChart(chats, 'main.jsonl', metas);
+    const { dots } = layoutChart(chart, chats, [], 'main.jsonl');
+    assert.equal(dots.find(dot => dot.depth === 0).lane, 0);
+    const tails = Object.keys(metas).map(file => dots.find(dot => dot.file === file && dot.text.startsWith('tail-')));
+    assert.deepEqual(tails.map(dot => dot.lane), [1, -1, 2, -2]);
+});

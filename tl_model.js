@@ -738,18 +738,20 @@ export function layoutChart(chart, chats, expanded = [], activeFile = null) {
     const walk = (node, lane) => {
         laneOf.set(node.id, lane);
         let keptRun = false;
+        const children = [];
         for (const id of node.childIds || []) {
             const child = chart.byId.get(id);
             if (!child) continue;
             if (!keptRun && child.kind === 'run') {
                 keptRun = true;
-                walk(child, lane);
+                children.push([child, lane]);
             } else {
-                const next = cursor;
+                const next = Math.ceil(cursor / 2) * (cursor % 2 ? 1 : -1);
                 cursor += 1;
-                walk(child, next);
+                children.push([child, next]);
             }
         }
+        for (const [child, next] of children) walk(child, next);
     };
     for (const root of chart.roots || []) {
         walk(root, 0);

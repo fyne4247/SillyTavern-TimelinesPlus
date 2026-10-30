@@ -2,6 +2,7 @@ import { buildChart, displayFileName, layoutChart } from './tl_model.js';
 
 const COL = 46;
 const ROW = 36;
+const MAX_ZOOM = 5;
 
 /**
  * Rank-aligned flowchart. Hover previews. Click opens a bubble with the
@@ -23,12 +24,15 @@ export function mountTimeline(root, handlers) {
         zoom: 1,
         popped: false,
         showFaces: false,
+        scrollZoom: false,
         userAvatar: '',
         charAvatar: '',
         userColor: '',
         charColor: '',
         hover: null,
     };
+
+    let clickTimer = null;
 
     root.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
@@ -42,6 +46,8 @@ export function mountTimeline(root, handlers) {
     });
 
     function update(partial) {
+        clearTimeout(clickTimer);
+        if (partial.scrollZoom !== undefined) state.scrollZoom = Boolean(partial.scrollZoom);
         if (partial.chats) state.chats = partial.chats;
         if (partial.metas) state.metas = partial.metas;
         if (Object.prototype.hasOwnProperty.call(partial, 'activeFile')) {
@@ -65,6 +71,7 @@ export function mountTimeline(root, handlers) {
     }
 
     function destroy() {
+        clearTimeout(clickTimer);
         root.replaceChildren();
     }
 
@@ -81,13 +88,15 @@ export function mountTimeline(root, handlers) {
         const drawn = picture();
         root.replaceChildren();
         root.classList.add('tlp-root');
+        root.classList.toggle('is-popped', state.popped);
+        root.classList.toggle('has-message', drawn.dots.some(dot => dot.key === state.bubbleKey));
         if (state.userColor) root.style.setProperty('--tlp-user', state.userColor);
         if (state.charColor) root.style.setProperty('--tlp-char', state.charColor);
         root.append(renderBar(drawn));
         root.append(renderStage(drawn));
         const selected = drawn.dots.find(dot => dot.key === state.bubbleKey);
         if (selected) root.append(renderBubble(selected));
-        if (state.hover) root.append(renderHover(state.hover));
+        if (state.hover && !state.bubbleKey) root.append(renderHover(state.hover));
         const stage = root.querySelector('.tlp-stage');
         if (stage) {
             stage.scrollLeft = left;
@@ -110,28 +119,29 @@ export function mountTimeline(root, handlers) {
             : 'No chat is open.';
         bar.append(status);
         const tools = el('div', 'tlp-tools');
-        tools.append(button('Zoom out', () => setZoom(state.zoom / 1.2)));
-        tools.append(button('Zoom in', () => setZoom(state.zoom * 1.2)));
-        tools.append(button('Show all', () => fit(drawn)));
-        tools.append(button('Expand all', () => {
+        tools.append(toolButton('Zoom out', () => setZoom(state.zoom / 1.2)));
+        tools.append(toolButton('Zoom in', () => setZoom(state.zoom * 1.2)));
+        tools.append(toolButton('Show all', () => fit(drawn)));
+        tools.append(toolButton('Expand all', () => {
             for (const node of drawn.chart.nodes || []) {
                 if (node.kind === 'run' && node.depthEnd - node.depthStart > 2) state.expanded.add(node.id);
             }
             render();
         }));
-        tools.append(button('Collapse all', () => {
+        tools.append(toolButton('Collapse all', () => {
             state.expanded.clear();
             state.bubbleKey = null;
             render();
         }));
-        tools.append(button(state.popped ? 'Dock' : 'Pop out', () => {
+        tools.append(toolButton(state.popped ? 'Dock' : 'Pop out', () => {
             if (state.popped) handlers.onDock?.();
             else handlers.onPopout?.();
         }));
-        tools.append(button('Close', () => handlers.onClose?.()));
-        tools.append(button('You are here', () => {
+        tools.append(toolButton('Close', () => handlers.onClose?.()));
+        tools.append(toolButton('You are here', () => {
             state.activeFile = state.openFile;
             state.activeDepth = state.openDepth;
+            state.zoom = MAX_ZOOM;
             render();
             root.querySelector('.tlp-dot.is-current')?.scrollIntoView({ block: 'center', inline: 'center' });
         }));
@@ -161,7 +171,7 @@ export function mountTimeline(root, handlers) {
     function renderStage(drawn) {
         const stage = el('div', 'tlp-stage');
         const maxRow = drawn.dots.reduce((max, dot) => Math.max(max, dot.row || 0), 0);
-        const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, dot.lane), 0);
+        const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, Math.abs(dot.lane)), 0);
         const boardW = maxLane * 2 * COL + 32;
         const boardH = (maxRow + 1) * ROW + 36;
         const sizer = el('div', 'tlp-sizer');
@@ -195,6 +205,11 @@ export function mountTimeline(root, handlers) {
         sizer.append(board);
         stage.append(sizer);
         bindDrag(stage);
+        stage.addEventListener('wheel', (event) => {
+            if (!state.scrollZoom || !event.deltaY) return;
+            event.preventDefault();
+            setZoom(state.zoom * Math.exp(-Math.max(-100, Math.min(100, event.deltaY)) * 0.003), event);
+        }, { passive: false });
         if (!drawn.dots.length) {
             const empty = el('p', 'tlp-empty');
             empty.textContent = state.loadingLabel || 'This chat has no messages yet.';
@@ -222,7 +237,7 @@ export function mountTimeline(root, handlers) {
         num.textContent = String(dot.depth + 1);
         button.append(orb, num);
         button.addEventListener('mouseenter', (event) => {
-            if (state.bubbleKey === dot.key) return;
+            if (state.bubbleKey) return;
             state.hover = { text: dot.preview || 'Empty message', name: dot.name, depth: dot.depth };
             const existing = root.querySelector('.tlp-hover');
             existing?.remove();
@@ -234,7 +249,21 @@ export function mountTimeline(root, handlers) {
         });
         button.addEventListener('click', (event) => {
             event.stopPropagation();
-            openDot(dot);
+            clearTimeout(clickTimer);
+            if (event.detail === 0) openDot(dot);
+            else clickTimer = setTimeout(() => openDot(dot), 280);
+        });
+        button.addEventListener('dblclick', (event) => {
+            event.stopPropagation();
+            clearTimeout(clickTimer);
+            const { chart } = picture();
+            const segment = chart.byId.get(dot.segmentId);
+            if (segment?.kind !== 'run') return;
+            if (state.expanded.has(segment.id)) state.expanded.delete(segment.id);
+            else state.expanded.add(segment.id);
+            state.bubbleKey = null;
+            state.hover = null;
+            render();
         });
         return button;
     }
@@ -315,20 +344,36 @@ export function mountTimeline(root, handlers) {
         render();
     }
 
-    function setZoom(value) {
-        state.zoom = Math.min(2.5, Math.max(0.08, value));
+    function setZoom(value, event) {
+        const stage = root.querySelector('.tlp-stage');
+        const board = root.querySelector('.tlp-board');
+        const stageRect = stage?.getBoundingClientRect();
+        const rect = board?.getBoundingClientRect();
+        const x = event ? event.clientX - stageRect.left : (stage?.clientWidth || 0) / 2;
+        const y = event ? event.clientY - stageRect.top : (stage?.clientHeight || 0) / 2;
+        const localX = rect ? ((stageRect.left + x) - rect.left) / state.zoom : 0;
+        const localY = rect ? ((stageRect.top + y) - rect.top) / state.zoom : 0;
+        state.zoom = Math.min(MAX_ZOOM, Math.max(0.08, value));
+        state.hover = null;
         render();
+        const next = root.querySelector('.tlp-stage');
+        const nextBoard = root.querySelector('.tlp-board')?.getBoundingClientRect();
+        if (next && nextBoard) {
+            const bounds = next.getBoundingClientRect();
+            next.scrollLeft += nextBoard.left - bounds.left + localX * state.zoom - x;
+            next.scrollTop += nextBoard.top - bounds.top + localY * state.zoom - y;
+        }
     }
 
     function fit(drawn) {
         const stage = root.querySelector('.tlp-stage');
         const maxRow = drawn.dots.reduce((max, dot) => Math.max(max, dot.row || 0), 0);
-        const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, dot.lane), 0);
+        const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, Math.abs(dot.lane)), 0);
         const boardW = maxLane * 2 * COL + 32;
         const boardH = (maxRow + 1) * ROW + 36;
         const width = stage?.clientWidth || root.clientWidth || 400;
         const height = stage?.clientHeight || 500;
-        state.zoom = Math.min(1.4, Math.max(0.08, Math.min(width / boardW, height / boardH)));
+        state.zoom = Math.min(1.4, Math.max(0.08, Math.min(Math.max(1, width - 24) / boardW, Math.max(1, height - 48) / boardH)));
         render();
         const next = root.querySelector('.tlp-stage');
         if (next) {
@@ -367,5 +412,23 @@ function button(label, onClick) {
         event.stopPropagation();
         onClick();
     });
+    return node;
+}
+
+function toolButton(label, onClick) {
+    const icons = {
+        'Zoom out': 'fa-magnifying-glass-minus', 'Zoom in': 'fa-magnifying-glass-plus',
+        'Show all': 'fa-expand', 'Expand all': 'fa-angles-down',
+        'Collapse all': 'fa-angles-up', 'Dock': 'fa-right-to-bracket',
+        'Pop out': 'fa-up-right-from-square', 'Close': 'fa-xmark',
+        'You are here': 'fa-location-crosshairs',
+    };
+    const node = button(label, onClick);
+    node.classList.add('tlp-icon-button');
+    node.title = label;
+    node.setAttribute('aria-label', label);
+    const icon = el('i', `fa-solid ${icons[label]}`);
+    icon.setAttribute('aria-hidden', 'true');
+    node.replaceChildren(icon);
     return node;
 }

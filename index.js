@@ -108,6 +108,7 @@ function faceOptions() {
     }
     return {
         showFaces: timelineSettings().showNodeFaces === true,
+        scrollZoom: timelineSettings().scrollZoom === true,
         userAvatar,
         charAvatar,
     };
@@ -413,6 +414,7 @@ function timelineSettings() {
     if (typeof settings.timeline.showNodeFaces !== 'boolean') {
         settings.timeline.showNodeFaces = false;
     }
+    if (typeof settings.timeline.scrollZoom !== 'boolean') settings.timeline.scrollZoom = false;
     return settings.timeline;
 }
 
@@ -515,6 +517,12 @@ jQuery(async () => {
         timelineSettings().showTopBarButton = $('#tl_top_bar_button').prop('checked');
         getContext().saveSettingsDebounced();
         placeTopBarButton();
+    });
+    $('#tl_scroll_zoom').prop('checked', timelineSettings().scrollZoom);
+    $('#tl_scroll_zoom').on('input', () => {
+        timelineSettings().scrollZoom = $('#tl_scroll_zoom').prop('checked');
+        getContext().saveSettingsDebounced();
+        view?.update(faceOptions());
     });
     $('#tl_node_faces').prop('checked', timelineSettings().showNodeFaces);
     $('#tl_node_faces').on('input', () => {

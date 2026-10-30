@@ -38,3 +38,18 @@ NEXT ACTION: Push master and staging to origin after saving this record, then ve
 Live read-only inspection found the installed extension at data/default-user/extensions/SillyTavern-TimelinesPlus on the local running SillyTavern. index.js hardcoded the older SillyTavern-Timelines folder for timeline.html. Verified HTTP 404 at that old URL and HTTP 200 at the actual Plus URL. Changed template resolution to new URL('./timeline.html', import.meta.url).href so installation folder names do not matter. All 11 model tests, syntax, and whitespace checks pass. This diagnosis is HTTP/source verified, not browser verified.
 
 NEXT ACTION: Validate startup after refreshing SillyTavern. Keep chat data untouched. Publication of this follow-up is separate from the previous completed push.
+
+## Compact dock, message viewers, and navigation
+
+Current work on staging, based on 041657b. Owner requested flush right docking, a smaller docked reader, a vertical pop-out reader, double-click collapse, larger zoom, alternating branch directions, a saved scroll-to-zoom toggle, icon toolbar, square inline portrait, maximum zoom on You are here, and no hover previews while the reader is open.
+
+Implemented:
+- Dock sits at top/right/bottom zero, square corners, 420px wide, without overriding chat geometry. Pop out remains an explicit alternate presentation; Dock toolbar action returns to the edge.
+- Docked reader capped at the smaller of 190px or 24% of panel height. Pop-out reader occupies a right-hand column; narrow screens use a small bottom reader.
+- Double-click toggles the clicked run's expanded state. Single-click still selects a message and expands its run where applicable; delayed slightly to distinguish double-click.
+- Maximum zoom increased from 2.5 to 5; You are here restores the actual open chat, zooms to 5, and centers its current node. Wheel zoom anchors to the pointer and is off by default; checkbox persists in extension settings.
+- Fork lanes alternate positive/negative around the main path. Header portrait is 32px square, aligned with icon controls. Icons have labels for accessibility and title tooltips. Hover previews are suppressed whenever a message viewer is selected.
+
+Verified: 12 model tests pass, including lane alternation; syntax and whitespace checks pass. Added tests/browser-smoke.mjs and dev/ui-fixture.html using only synthetic data. Isolated headless Chromium smoke checks pass for edge alignment, unchanged chat geometry, square portrait, expand/collapse via double-click, docked reader cap, hover suppression, 5x current-node focus, wheel toggle, pop-out side reader, narrow viewport, and no page errors. Used existing cached Node Playwright and Chromium through PLAYWRIGHT_MODULE and PLAYWRIGHT_EXECUTABLE; Python Playwright is not installed. Verified all chosen icon names exist in the installed SillyTavern Font Awesome CSS. Screenshot visually inspected using synthetic data. No live chat/browser verification performed.
+
+NEXT ACTION: Present the staging change for owner review. Do not merge this UI follow-up to master, push, or deploy without owner authorization. Installed copy remains at 041657b; refreshing it will not show this new UI yet.
