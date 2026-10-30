@@ -32,3 +32,9 @@ NEXT ACTION: Verify switching between an independent chat and a saved branch whi
 Owner explicitly requested merging all work and pushing. The default branch is master (there is no main branch). Refreshed origin; master was an ancestor of staging. Fast-forwarded master from 03f7434 to 802113c, including all eight staging commits. Reviewed the changes from this session and publication file list; private fixture chats and browser outputs remain ignored. Re-ran all 11 model tests successfully, checked JavaScript syntax, and checked whitespace. Live UI verification remains pending; this is not a claim of browser validation.
 
 NEXT ACTION: Push master and staging to origin after saving this record, then verify remote refs. Do not deploy or modify a live installation; that was not requested.
+
+## Startup repair
+
+Live read-only inspection found the installed extension at data/default-user/extensions/SillyTavern-TimelinesPlus on the local running SillyTavern. index.js hardcoded the older SillyTavern-Timelines folder for timeline.html. Verified HTTP 404 at that old URL and HTTP 200 at the actual Plus URL. Changed template resolution to new URL('./timeline.html', import.meta.url).href so installation folder names do not matter. All 11 model tests, syntax, and whitespace checks pass. This diagnosis is HTTP/source verified, not browser verified.
+
+NEXT ACTION: Validate startup after refreshing SillyTavern. Keep chat data untouched. Publication of this follow-up is separate from the previous completed push.

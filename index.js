@@ -6,8 +6,8 @@ import { registerSlashCommand } from '../../../slash-commands.js';
 import { closeModal, navigateToMessage } from './tl_utils.js';
 import { mountTimeline } from './tl_view.js';
 
-const extensionName = 'SillyTavern-Timelines';
-const extensionFolderPath = `scripts/extensions/third-party/${extensionName}/`;
+// Resolve assets beside this module, regardless of the installation folder name.
+const timelineTemplateUrl = new URL('./timeline.html', import.meta.url).href;
 
 const cache = new Map();
 let view = null;
@@ -506,7 +506,7 @@ function installEntryPoints() {
 }
 
 jQuery(async () => {
-    const settingsHtml = await $.get(`${extensionFolderPath}timeline.html`);
+    const settingsHtml = await $.get(timelineTemplateUrl);
     const getContainer = () => $(document.getElementById('timelines_container') ?? document.getElementById('extensions_settings'));
     getContainer().append(settingsHtml);
     $('#show_timeline_view').on('click', () => openTimeline(false));
