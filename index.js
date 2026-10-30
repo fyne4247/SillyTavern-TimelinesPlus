@@ -1,5 +1,5 @@
 import { getContext } from '../../../extensions.js';
-import { event_types, eventSource } from '../../../../script.js';
+import { event_types, eventSource, getThumbnailUrl, user_avatar } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 import { createNewBookmark } from '../../../bookmarks.js';
 import { registerSlashCommand } from '../../../slash-commands.js';
@@ -27,6 +27,49 @@ function activeFileName(context) {
     return String(chatId).endsWith('.jsonl') ? String(chatId) : `${chatId}.jsonl`;
 }
 
+function ensureDock() {
+    let dock = document.getElementById('tlpDock');
+    if (!dock) {
+        dock = document.createElement('div');
+        dock.id = 'tlpDock';
+        dock.hidden = true;
+        document.body.appendChild(dock);
+    }
+    return dock;
+}
+
+function rootNode() {
+    return document.getElementById('tlpRoot');
+}
+
+function showDock() {
+    const dock = ensureDock();
+    const root = rootNode();
+    if (root) dock.appendChild(root);
+    dock.hidden = false;
+    const modal = document.getElementById('timelinesModal');
+    if (modal) modal.style.display = 'none';
+    view?.update({ popped: false, ...faceOptions() });
+}
+
+function showPopout() {
+    const modal = document.getElementById('timelinesModal');
+    const shell = document.getElementById('networkContainer');
+    const root = rootNode();
+    if (!modal || !shell || !root) return;
+    document.body.appendChild(modal);
+    shell.appendChild(root);
+    modal.style.display = 'block';
+    ensureDock().hidden = true;
+    view?.update({ popped: true });
+}
+
+function hideTimeline() {
+    const dock = document.getElementById('tlpDock');
+    if (dock) dock.hidden = true;
+    closeModal();
+}
+
 function showModal() {
     const modal = document.getElementById('timelinesModal');
     if (!modal) {
@@ -46,6 +89,24 @@ function colors() {
     return {
         userColor: power_user?.quote_text_color || '',
         charColor: power_user?.main_text_color || '',
+    };
+}
+
+function faceOptions() {
+    const context = getContext();
+    const character = context.characters?.[context.characterId];
+    let userAvatar = '';
+    let charAvatar = '';
+    try {
+        if (user_avatar) userAvatar = getThumbnailUrl('persona', user_avatar);
+        if (character?.avatar) charAvatar = getThumbnailUrl('avatar', character.avatar);
+    } catch (error) {
+        console.warn('Timelines: avatar lookup failed', error);
+    }
+    return {
+        showFaces: timelineSettings().showNodeFaces === true,
+        userAvatar,
+        charAvatar,
     };
 }
 
@@ -70,17 +131,22 @@ function ensureView() {
     const root = document.getElementById('tlpRoot');
     view = mountTimeline(root, {
         formatMessage,
-        onClose: () => closeModal(),
+        onClose: () => hideTimeline(),
+        onPopout: () => showPopout(),
+        onDock: () => {
+            showDock();
+            view?.update({ popped: false });
+        },
         onOpen: async (file, depth) => {
-            closeModal();
+            hideTimeline();
             await navigateToMessage(file, depth);
         },
         onFork: async (file, depth, swipeId) => {
-            closeModal();
+            hideTimeline();
             await navigateToMessage(file, depth, swipeId ?? -1, true);
         },
         onEdit: async (file, depth) => {
-            closeModal();
+            hideTimeline();
             await navigateToMessage(file, depth);
             const message = document.querySelector(`#chat [mesid="${depth}"]`);
             message?.querySelector('.mes_edit')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -90,7 +156,7 @@ function ensureView() {
             if (!name) {
                 return;
             }
-            closeModal();
+            hideTimeline();
             await navigateToMessage(file, depth);
             await createNewBookmark(depth, { forceName: name });
         },
@@ -241,7 +307,7 @@ async function openTimeline(reload) {
         session.metas[file] = { mainChat: context.chatMetadata?.main_chat || null };
     }
 
-    showModal();
+    showDock();
     const mounted = ensureView();
     const depth = Math.max(0, live.length - 1);
     mounted.update({
@@ -250,8 +316,9 @@ async function openTimeline(reload) {
         activeFile: file,
         activeDepth: depth,
         loadingLabel: 'Loading other chats…',
-        scrollToActive: true,
+        popped: false,
         ...colors(),
+        ...faceOptions(),
     });
 
     let list = [];
@@ -327,6 +394,9 @@ function timelineSettings() {
     }
     if (typeof settings.timeline.showTopBarButton !== 'boolean') {
         settings.timeline.showTopBarButton = true;
+    }
+    if (typeof settings.timeline.showNodeFaces !== 'boolean') {
+        settings.timeline.showNodeFaces = false;
     }
     return settings.timeline;
 }
@@ -427,6 +497,12 @@ jQuery(async () => {
         timelineSettings().showTopBarButton = $('#tl_top_bar_button').prop('checked');
         getContext().saveSettingsDebounced();
         placeTopBarButton();
+    });
+    $('#tl_node_faces').prop('checked', timelineSettings().showNodeFaces);
+    $('#tl_node_faces').on('input', () => {
+        timelineSettings().showNodeFaces = $('#tl_node_faces').prop('checked');
+        getContext().saveSettingsDebounced();
+        view?.update(faceOptions());
     });
     registerSlashCommand('tl', slashCommandHandler, [], '/tl Show the timeline. "/tl r" reloads every chat file.', false, true);
     installEntryPoints();

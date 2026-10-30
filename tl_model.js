@@ -565,17 +565,20 @@ export function graphRangeForSegment(segment, activeDepth, activeFile) {
  * @param {Record<string, {mainChat?: string|null}>} [metas]
  * @returns {{ spine: object[], forks: object[], others: string[], related: string[] }}
  */
-export function buildFlow(chats, activeFile, metas = {}) {
+/**
+ * Files that belong on this chat's flowchart, and files that are a different story.
+ * @param {Record<string, object[]>} chats
+ * @param {string|null} activeFile
+ * @param {Record<string, {mainChat?: string|null}>} [metas]
+ * @returns {{ related: string[], others: string[] }}
+ */
+export function familyOf(chats, activeFile, metas = {}) {
     const source = chats && typeof chats === 'object' ? chats : {};
     const names = Object.keys(source).filter(name => Array.isArray(source[name]) && source[name].length > 0);
     if (!activeFile || !source[activeFile]?.length) {
-        return { spine: [], forks: [], others: names, related: [] };
+        return { related: [], others: names };
     }
-
-    const active = source[activeFile];
-    const activeStem = displayFileName(activeFile);
     const stemToFile = new Map(names.map(name => [displayFileName(name), name]));
-
     const namedParent = (file) => {
         const raw = metas?.[file]?.mainChat;
         if (!raw) {
@@ -590,7 +593,6 @@ export function buildFlow(chats, activeFile, metas = {}) {
         }
         return stemToFile.get(raw) || stemToFile.get(displayFileName(raw)) || null;
     };
-
     const textAt = (file, depth) => normalizeMessageText(source[file][depth]?.mes);
     const related = new Set([activeFile]);
     for (const file of names) {
@@ -603,6 +605,231 @@ export function buildFlow(chats, activeFile, metas = {}) {
             related.add(file);
         }
     }
+    return {
+        related: [...related],
+        others: names.filter(name => !related.has(name)).sort(),
+    };
+}
+
+/**
+ * Top-down flowchart for one family. A run with no split is one node.
+ * A file that shares the run and then stops becomes its own branch, so a
+ * fork is visible on the parent even when it has no later messages.
+ *
+ * @param {Record<string, object[]>} chats
+ * @param {string|null} activeFile
+ * @param {Record<string, {mainChat?: string|null}>} [metas]
+ */
+export function buildChart(chats, activeFile, metas = {}) {
+    const source = chats && typeof chats === 'object' ? chats : {};
+    const { related, others } = familyOf(source, activeFile, metas);
+    /** @type {object[]} */
+    const nodes = [];
+    if (!related.length) {
+        return { nodes, roots: [], others, related };
+    }
+    let nextId = 0;
+    /** @type {{ files: string[], depth: number, parentId: string|null }[]} */
+    const queue = [{ files: related.slice(), depth: 0, parentId: null }];
+    const textAt = (file, depth) => normalizeMessageText(source[file][depth]?.mes);
+
+    while (queue.length) {
+        const job = queue.shift();
+        const alive = job.files.filter(file => job.depth < source[file].length);
+        if (!alive.length) {
+            continue;
+        }
+        /** @type {Map<string, string[]>} */
+        const groups = new Map();
+        for (const file of alive) {
+            const key = textAt(file, job.depth);
+            const list = groups.get(key);
+            if (list) {
+                list.push(file);
+            } else {
+                groups.set(key, [file]);
+            }
+        }
+        for (const group of groups.values()) {
+            let end = job.depth + 1;
+            while (group.every(file => end < source[file].length)) {
+                const text = textAt(group[0], end);
+                if (!group.every(file => textAt(file, end) === text)) {
+                    break;
+                }
+                end += 1;
+            }
+            const head = source[group[0]][job.depth];
+            const tail = source[group[0]][end - 1];
+            const node = {
+                id: `n${nextId}`,
+                kind: 'run',
+                parentId: job.parentId,
+                childIds: [],
+                files: group.slice(),
+                depthStart: job.depth,
+                depthEnd: end,
+                preview: previewText(head?.mes, 220),
+                tailPreview: previewText(tail?.mes, 220),
+                headName: head?.name || '',
+                tailName: tail?.name || '',
+            };
+            nextId += 1;
+            nodes.push(node);
+            const ended = group.filter(file => source[file].length === end);
+            const cont = group.filter(file => source[file].length > end);
+            if (cont.length && ended.length) {
+                for (const file of ended) {
+                    nodes.push({
+                        id: `n${nextId}`,
+                        kind: 'end',
+                        parentId: node.id,
+                        childIds: [],
+                        files: [file],
+                        depthStart: end - 1,
+                        depthEnd: end,
+                        preview: previewText(source[file][end - 1]?.mes, 220),
+                        tailPreview: '',
+                        headName: source[file][end - 1]?.name || '',
+                        tailName: '',
+                    });
+                    nextId += 1;
+                }
+            }
+            if (cont.length) {
+                queue.push({ files: cont, depth: end, parentId: node.id });
+            }
+        }
+    }
+
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    for (const node of nodes) {
+        node.childIds = nodes.filter(child => child.parentId === node.id).map(child => child.id);
+        node.childIds.sort((a, b) => {
+            const left = byId.get(a);
+            const right = byId.get(b);
+            const leftActive = activeFile && left.files.includes(activeFile) ? 0 : 1;
+            const rightActive = activeFile && right.files.includes(activeFile) ? 0 : 1;
+            if (leftActive !== rightActive) {
+                return leftActive - rightActive;
+            }
+            if (left.kind !== right.kind) {
+                return left.kind === 'run' ? -1 : 1;
+            }
+            return (left.files[0] || '').localeCompare(right.files[0] || '');
+        });
+    }
+    const roots = nodes.filter(node => !node.parentId);
+    return { nodes, roots, byId, others, related };
+}
+
+/**
+ * Places the collapsed (or partly expanded) chart on a shared message-number grid.
+ * y is the message index. x is the branch column. Expanding one run adds dots
+ * on their own rows and leaves every other dot where it was.
+ *
+ * @param {object} chart
+ * @param {Record<string, object[]>} chats
+ * @param {Iterable<string>} [expanded]
+ * @param {string|null} [activeFile]
+ */
+export function layoutChart(chart, chats, expanded = [], activeFile = null) {
+    const expandedSet = expanded instanceof Set ? expanded : new Set(expanded || []);
+    const laneOf = new Map();
+    let cursor = 1;
+    const walk = (node, lane) => {
+        laneOf.set(node.id, lane);
+        let keptRun = false;
+        for (const id of node.childIds || []) {
+            const child = chart.byId.get(id);
+            if (!child) continue;
+            if (!keptRun && child.kind === 'run') {
+                keptRun = true;
+                walk(child, lane);
+            } else {
+                const next = cursor;
+                cursor += 1;
+                walk(child, next);
+            }
+        }
+    };
+    for (const root of chart.roots || []) {
+        walk(root, 0);
+    }
+
+    /** @type {Map<string, object>} */
+    const dotAt = new Map();
+    /** @type {object[]} */
+    const dots = [];
+    const addDot = (segment, depth) => {
+        const key = `${segment.id}:${depth}`;
+        if (dotAt.has(key)) return dotAt.get(key);
+        const file = activeFile && segment.files.includes(activeFile) ? activeFile : segment.files[0];
+        const message = chats?.[file]?.[depth];
+        const dot = {
+            key,
+            segmentId: segment.id,
+            depth,
+            lane: laneOf.get(segment.id) || 0,
+            file,
+            name: message?.name || segment.headName || '',
+            isUser: Boolean(message?.is_user),
+            preview: previewText(message?.mes ?? segment.preview, 140),
+            text: message?.mes || '',
+            kind: segment.kind,
+            files: segment.files,
+        };
+        dotAt.set(key, dot);
+        dots.push(dot);
+        return dot;
+    };
+
+    /** @type {{from: string, to: string}[]} */
+    const edges = [];
+    const link = (from, to) => {
+        if (from && to && from !== to) edges.push({ from, to });
+    };
+
+    for (const segment of chart.nodes || []) {
+        if (segment.kind === 'end') {
+            addDot(segment, segment.depthStart);
+            continue;
+        }
+        const depths = new Set([segment.depthStart, segment.depthEnd - 1]);
+        if (expandedSet.has(segment.id)) {
+            for (let depth = segment.depthStart; depth < segment.depthEnd; depth += 1) {
+                depths.add(depth);
+            }
+        }
+        const ordered = [...depths].sort((a, b) => a - b);
+        let previous = null;
+        for (const depth of ordered) {
+            const dot = addDot(segment, depth);
+            if (previous) link(previous.key, dot.key);
+            previous = dot;
+        }
+    }
+
+    for (const segment of chart.nodes || []) {
+        if (!segment.parentId) continue;
+        const parent = chart.byId.get(segment.parentId);
+        if (!parent) continue;
+        link(`${parent.id}:${parent.depthEnd - 1}`, `${segment.id}:${segment.depthStart}`);
+    }
+
+    return { dots, edges, laneCount: Math.max(cursor, 1) };
+}
+
+export function buildFlow(chats, activeFile, metas = {}) {
+    const source = chats && typeof chats === 'object' ? chats : {};
+    const names = Object.keys(source).filter(name => Array.isArray(source[name]) && source[name].length > 0);
+    const { related: relatedList, others } = familyOf(source, activeFile, metas);
+    if (!activeFile || !source[activeFile]?.length) {
+        return { spine: [], forks: [], others: names, related: [] };
+    }
+    const related = new Set(relatedList);
+    const active = source[activeFile];
+    const textAt = (file, depth) => normalizeMessageText(source[file][depth]?.mes);
 
     const spine = active.map((message, depth) => ({
         depth,
@@ -626,17 +853,14 @@ export function buildFlow(chats, activeFile, metas = {}) {
         while (shared < limit && textAt(activeFile, shared) === textAt(file, shared)) {
             shared += 1;
         }
-        const linked = namedParent(file) === activeFile || namedParent(activeFile) === file;
         if (shared === 0) {
-            if (linked) {
-                forks.push({
-                    anchor: 0,
-                    file,
-                    kind: 'linked',
-                    preview: previewText(messages[0]?.mes, 160),
-                    otherLength: messages.length,
-                });
-            }
+            forks.push({
+                anchor: 0,
+                file,
+                kind: 'linked',
+                preview: previewText(messages[0]?.mes, 160),
+                otherLength: messages.length,
+            });
             continue;
         }
         if (shared < messages.length && shared < active.length) {
@@ -675,7 +899,6 @@ export function buildFlow(chats, activeFile, metas = {}) {
     }
 
     forks.sort((a, b) => a.anchor - b.anchor || a.file.localeCompare(b.file));
-    const others = names.filter(name => !related.has(name)).sort();
     return { spine, forks, others, related: [...related] };
 }
 

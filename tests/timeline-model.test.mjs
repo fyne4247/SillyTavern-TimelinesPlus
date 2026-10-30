@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
     GRAPH_WINDOW,
+    buildChart,
     buildFlow,
     buildTimeline,
     graphElements,
+    layoutChart,
     graphRangeForSegment,
     neighborBranch,
     preferActiveFile,
@@ -164,6 +166,37 @@ test('graph window stays inside a long segment and neighbor branch walks forks',
     const next = neighborBranch(timeline, 'a.jsonl', 0, 1);
     assert.ok(next);
     assert.ok(next.depthStart >= 10 || next.files.length === 1);
+});
+
+test('collapsed chart keeps message numbers on shared rows', () => {
+    const stem = chain(10, 'stem');
+    const chats = {
+        'parent.jsonl': stem.concat(chain(5, 'more')),
+        'branch.jsonl': stem.map(message => ({ ...message })),
+    };
+    const chart = buildChart(chats, 'parent.jsonl');
+    const collapsed = layoutChart(chart, chats, [], 'parent.jsonl');
+    const rows = new Map();
+    for (const dot of collapsed.dots) {
+        const list = rows.get(dot.depth) || [];
+        list.push(dot);
+        rows.set(dot.depth, list);
+    }
+    assert.ok(rows.get(0)?.length);
+    assert.ok(rows.get(9)?.some(dot => dot.kind === 'end'));
+    assert.ok(rows.get(9)?.some(dot => dot.kind === 'run'));
+    assert.equal(rows.get(9).every(dot => dot.depth === 9), true);
+    const endLane = rows.get(9).find(dot => dot.kind === 'end').lane;
+    const sharedLane = rows.get(9).find(dot => dot.kind === 'run').lane;
+    assert.notEqual(endLane, sharedLane);
+
+    const tail = chart.nodes.find(node => node.kind === 'run' && node.depthStart === 10);
+    const expanded = layoutChart(chart, chats, [tail.id], 'parent.jsonl');
+    const endAfter = expanded.dots.find(dot => dot.kind === 'end');
+    assert.equal(endAfter.depth, 9);
+    assert.equal(endAfter.lane, endLane);
+    assert.ok(expanded.dots.some(dot => dot.depth === 12 && dot.lane === sharedLane));
+    assert.equal(expanded.dots.filter(dot => dot.depth === 12).every(dot => dot.lane === sharedLane), true);
 });
 
 test('a branch that stops is still a fork on the longer chat', () => {
