@@ -275,7 +275,19 @@ function bindListeners() {
             cache.delete(file);
         }
     };
-    eventSource.on(event_types.CHAT_CHANGED, dropActiveCache);
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        dropActiveCache();
+        const dock = document.getElementById('tlpDock');
+        const modal = document.getElementById('timelinesModal');
+        const popped = modal?.style.display === 'block';
+        if ((dock && !dock.hidden) || popped) {
+            openTimeline(false);
+            if (popped) showPopout();
+        } else {
+            // Invalidate requests from the previous chat, even while hidden.
+            loadToken += 1;
+        }
+    });
     eventSource.on(event_types.MESSAGE_EDITED, dropActiveCache);
     eventSource.on(event_types.MESSAGE_DELETED, dropActiveCache);
     eventSource.on(event_types.MESSAGE_UPDATED, dropActiveCache);

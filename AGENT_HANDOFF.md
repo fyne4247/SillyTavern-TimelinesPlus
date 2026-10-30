@@ -16,3 +16,13 @@ Verification: all 10 existing model tests passed; JavaScript syntax and git diff
 
 ## NEXT ACTION
 Verify visually in SillyTavern with a branched chat: compare chat geometry before/after opening, toggle the top-bar button twice, check root centering and current marker, open a bottom/right message, zoom, and use You are here. Check narrow screens and pop-out mode. Do not push or deploy without owner authorization.
+
+## Follow-up: family filtering and chat switches
+
+Removed shared-opening inference: familyOf now follows saved main_chat and bookmark_link relationships transitively in both directions. Separate chats sharing even identical text remain separate without a saved link. Older imported/copied branches without relationship metadata will appear as separate chats rather than guessed branches.
+
+CHAT_CHANGED now reloads a visible timeline using the newly open chat, preserves pop-out presentation, and invalidates outstanding loads when hidden. Changing active files clears expanded-node and selected-message state, including when the new chat is empty.
+
+Verification: 11 model tests pass, including a new regression covering independent identical chats, siblings, grandchildren, and checkpoint links. Syntax checks and diff whitespace checks pass. Live chat-switch and visual verification still pending. Changes remain on staging; no main merge, push, or deployment.
+
+NEXT ACTION: Verify switching between an independent chat and a saved branch while the timeline is docked and popped out. Confirm that old asynchronous loads do not replace the new chat, and that imported branches without metadata remain separate as intended.

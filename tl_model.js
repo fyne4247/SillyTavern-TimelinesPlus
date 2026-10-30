@@ -579,31 +579,29 @@ export function familyOf(chats, activeFile, metas = {}) {
         return { related: [], others: names };
     }
     const stemToFile = new Map(names.map(name => [displayFileName(name), name]));
-    const namedParent = (file) => {
-        const raw = metas?.[file]?.mainChat;
-        if (!raw) {
-            return null;
-        }
-        if (source[raw]) {
-            return raw;
-        }
+    const resolveFile = (raw) => {
+        if (!raw || typeof raw !== 'string') return null;
+        if (names.includes(raw)) return raw;
         const withExt = raw.endsWith('.jsonl') ? raw : `${raw}.jsonl`;
-        if (source[withExt]) {
-            return withExt;
-        }
+        if (names.includes(withExt)) return withExt;
         return stemToFile.get(raw) || stemToFile.get(displayFileName(raw)) || null;
     };
-    const textAt = (file, depth) => normalizeMessageText(source[file][depth]?.mes);
-    const related = new Set([activeFile]);
+    // A shared greeting is not evidence of a fork. Follow saved links in
+    // both directions, including siblings and branches of branches.
+    const links = new Map(names.map(file => [file, new Set()]));
     for (const file of names) {
-        if (file === activeFile) {
-            continue;
+        const targets = [metas?.[file]?.mainChat,
+            ...source[file].map(message => message?.extra?.bookmark_link)];
+        for (const target of targets) {
+            const other = resolveFile(target);
+            if (!other) continue;
+            links.get(file).add(other);
+            links.get(other).add(file);
         }
-        const linked = namedParent(file) === activeFile || namedParent(activeFile) === file;
-        const sameOpening = textAt(file, 0) !== '' && textAt(file, 0) === textAt(activeFile, 0);
-        if (linked || sameOpening) {
-            related.add(file);
-        }
+    }
+    const related = new Set([activeFile]);
+    for (const file of related) {
+        for (const other of links.get(file) || []) related.add(other);
     }
     return {
         related: [...related],

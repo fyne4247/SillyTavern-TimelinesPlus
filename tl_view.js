@@ -44,7 +44,12 @@ export function mountTimeline(root, handlers) {
     function update(partial) {
         if (partial.chats) state.chats = partial.chats;
         if (partial.metas) state.metas = partial.metas;
-        if (partial.activeFile) {
+        if (Object.prototype.hasOwnProperty.call(partial, 'activeFile')) {
+            if (partial.activeFile !== state.openFile) {
+                state.expanded.clear();
+                state.bubbleKey = null;
+                state.hover = null;
+            }
             state.activeFile = partial.activeFile;
             state.openFile = partial.activeFile;
         }

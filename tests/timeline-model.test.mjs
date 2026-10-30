@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
     GRAPH_WINDOW,
     buildChart,
+    familyOf,
     buildFlow,
     buildTimeline,
     graphElements,
@@ -174,7 +175,7 @@ test('collapsed chart keeps message numbers on shared rows', () => {
         'parent.jsonl': stem.concat(chain(5, 'more')),
         'branch.jsonl': stem.map(message => ({ ...message })),
     };
-    const chart = buildChart(chats, 'parent.jsonl');
+    const chart = buildChart(chats, 'parent.jsonl', { 'branch.jsonl': { mainChat: 'parent' } });
     const collapsed = layoutChart(chart, chats, [], 'parent.jsonl');
     const rows = new Map();
     for (const dot of collapsed.dots) {
@@ -222,7 +223,7 @@ test('a branch that stops is still a fork on the longer chat', () => {
     assert.equal(ended.kind, 'ends');
     assert.equal(ended.anchor, 9);
 
-    const fromBranch = buildFlow(chats, 'branch.jsonl');
+    const fromBranch = buildFlow(chats, 'branch.jsonl', { 'branch.jsonl': { mainChat: 'parent' } });
     const cont = fromBranch.forks.find(fork => fork.file === 'parent.jsonl');
     assert.equal(cont.kind, 'continues');
     assert.equal(cont.anchor, 10);
@@ -234,7 +235,7 @@ test('a real split hangs off the first message that differs', () => {
         'parent.jsonl': stem.concat(chain(3, 'parent')),
         'fork.jsonl': stem.map(message => ({ ...message })).concat(chain(2, 'fork')),
     };
-    const flow = buildFlow(chats, 'parent.jsonl');
+    const flow = buildFlow(chats, 'parent.jsonl', { 'fork.jsonl': { mainChat: 'parent' } });
     const fork = flow.forks.find(item => item.file === 'fork.jsonl');
     assert.equal(fork.kind, 'diverges');
     assert.equal(fork.anchor, 4);
@@ -266,4 +267,18 @@ test('Papa, Rabbit, and Luna fixtures', () => {
     const rabbitGraph = graphElements(rabbit, 0, 40);
     const edgeKeys = new Set(rabbitGraph.edges.map(edge => `${edge.data.source}->${edge.data.target}`));
     assert.equal(edgeKeys.size, rabbitGraph.edges.length);
+});
+
+
+test('shared greetings do not connect independent chats; saved links connect the whole family', () => {
+    const chats = Object.fromEntries(['parent', 'branch', 'sibling', 'grandchild', 'independent'].map(name => [`${name}.jsonl`, chain(3, 'same')]));
+    const metas = {
+        'branch.jsonl': { mainChat: 'parent' },
+        'sibling.jsonl': { mainChat: 'parent.jsonl' },
+        'grandchild.jsonl': { mainChat: 'branch' },
+    };
+    assert.deepEqual(familyOf(chats, 'independent.jsonl', metas).related, ['independent.jsonl']);
+    assert.deepEqual(new Set(familyOf(chats, 'grandchild.jsonl', metas).related), new Set(['parent.jsonl', 'branch.jsonl', 'sibling.jsonl', 'grandchild.jsonl']));
+    chats['independent.jsonl'][1].extra = { bookmark_link: 'parent' };
+    assert.equal(familyOf(chats, 'independent.jsonl', metas).related.length, 5);
 });
