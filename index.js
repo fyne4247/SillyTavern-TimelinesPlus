@@ -47,6 +47,7 @@ function showDock() {
     const root = rootNode();
     if (root) dock.appendChild(root);
     dock.hidden = false;
+    document.body.classList.add('tlp-dock-open');
     const modal = document.getElementById('timelinesModal');
     if (modal) modal.style.display = 'none';
     view?.update({ popped: false, ...faceOptions() });
@@ -61,12 +62,14 @@ function showPopout() {
     shell.appendChild(root);
     modal.style.display = 'block';
     ensureDock().hidden = true;
+    document.body.classList.remove('tlp-dock-open');
     view?.update({ popped: true });
 }
 
 function hideTimeline() {
     const dock = document.getElementById('tlpDock');
     if (dock) dock.hidden = true;
+    document.body.classList.remove('tlp-dock-open');
     closeModal();
 }
 

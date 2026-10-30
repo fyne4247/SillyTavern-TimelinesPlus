@@ -138,10 +138,10 @@ export function mountTimeline(root, handlers) {
 
     function renderStage(drawn) {
         const stage = el('div', 'tlp-stage');
-        const maxDepth = drawn.dots.reduce((max, dot) => Math.max(max, dot.depth), 0);
+        const maxRow = drawn.dots.reduce((max, dot) => Math.max(max, dot.row || 0), 0);
         const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, dot.lane), 0);
-        const boardW = (maxLane + 1) * COL + 28;
-        const boardH = (maxDepth + 1) * ROW + 28;
+        const boardW = (maxLane + 1) * COL + 80;
+        const boardH = (maxRow + 1) * ROW + 36;
         const sizer = el('div', 'tlp-sizer');
         sizer.style.width = `${boardW * state.zoom}px`;
         sizer.style.height = `${boardH * state.zoom}px`;
@@ -175,6 +175,7 @@ export function mountTimeline(root, handlers) {
         }
         sizer.append(board);
         stage.append(sizer);
+        bindDrag(stage);
         if (!drawn.dots.length) {
             const empty = el('p', 'tlp-empty');
             empty.textContent = state.loadingLabel || 'This chat has no messages yet.';
@@ -188,7 +189,7 @@ export function mountTimeline(root, handlers) {
         button.type = 'button';
         button.className = `tlp-dot${dot.isUser ? ' is-user' : ''}${dot.kind === 'end' ? ' is-end' : ''}${dot.depth === state.activeDepth ? ' is-current' : ''}`;
         button.style.left = `${dot.lane * COL + 8}px`;
-        button.style.top = `${dot.depth * ROW + 4}px`;
+        button.style.top = `${dot.row * ROW + 4}px`;
         button.title = '';
         const orb = el('span', 'tlp-orb');
         const face = dot.isUser ? state.userAvatar : state.charAvatar;
@@ -199,11 +200,12 @@ export function mountTimeline(root, handlers) {
         const num = el('span', 'tlp-num');
         num.textContent = String(dot.depth + 1);
         button.append(orb, num);
-        button.addEventListener('mouseenter', () => {
+        button.addEventListener('mouseenter', (event) => {
+            if (state.bubbleKey === dot.key) return;
             state.hover = { text: dot.preview || 'Empty message', name: dot.name, depth: dot.depth };
             const existing = root.querySelector('.tlp-hover');
             existing?.remove();
-            root.append(renderHover(state.hover));
+            root.append(renderHover(state.hover, event));
         });
         button.addEventListener('mouseleave', () => {
             state.hover = null;
@@ -218,7 +220,7 @@ export function mountTimeline(root, handlers) {
 
     function renderBubble(dot) {
         const bubble = el('div', 'tlp-bubble');
-        const top = dot.depth * ROW + 4;
+        const top = dot.row * ROW + 4;
         const left = dot.lane * COL + COL;
         bubble.style.top = `${top}px`;
         bubble.style.left = `${left}px`;
@@ -241,10 +243,43 @@ export function mountTimeline(root, handlers) {
         return bubble;
     }
 
-    function renderHover(hover) {
+    function renderHover(hover, event) {
         const tip = el('div', 'tlp-hover');
         tip.textContent = hover.name ? `${hover.name} · ${hover.depth + 1} — ${hover.text}` : hover.text;
+        if (event) {
+            tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 260)}px`;
+            tip.style.top = `${Math.min(event.clientY + 14, window.innerHeight - 72)}px`;
+        }
         return tip;
+    }
+
+    function bindDrag(stage) {
+        let drag = null;
+        stage.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            if (event.target.closest('.tlp-dot, .tlp-bubble, .tlp-button, .tlp-file')) return;
+            drag = {
+                id: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                left: stage.scrollLeft,
+                top: stage.scrollTop,
+            };
+            stage.classList.add('is-dragging');
+            stage.setPointerCapture(event.pointerId);
+        });
+        stage.addEventListener('pointermove', (event) => {
+            if (!drag || drag.id !== event.pointerId) return;
+            stage.scrollLeft = drag.left - (event.clientX - drag.x);
+            stage.scrollTop = drag.top - (event.clientY - drag.y);
+        });
+        const end = (event) => {
+            if (!drag || (event && drag.id !== event.pointerId)) return;
+            drag = null;
+            stage.classList.remove('is-dragging');
+        };
+        stage.addEventListener('pointerup', end);
+        stage.addEventListener('pointercancel', end);
     }
 
     function openDot(dot) {
@@ -268,10 +303,10 @@ export function mountTimeline(root, handlers) {
 
     function fit(drawn) {
         const stage = root.querySelector('.tlp-stage');
-        const maxDepth = drawn.dots.reduce((max, dot) => Math.max(max, dot.depth), 0);
+        const maxRow = drawn.dots.reduce((max, dot) => Math.max(max, dot.row || 0), 0);
         const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, dot.lane), 0);
-        const boardW = (maxLane + 1) * COL + 28;
-        const boardH = (maxDepth + 1) * ROW + 28;
+        const boardW = (maxLane + 1) * COL + 80;
+        const boardH = (maxRow + 1) * ROW + 36;
         const width = stage?.clientWidth || root.clientWidth || 400;
         const height = stage?.clientHeight || 500;
         state.zoom = Math.min(1.4, Math.max(0.08, Math.min(width / boardW, height / boardH)));
@@ -287,7 +322,7 @@ export function mountTimeline(root, handlers) {
 }
 
 function center(dot) {
-    return { x: dot.lane * COL + 8 + 9, y: dot.depth * ROW + 4 + 9 };
+    return { x: dot.lane * COL + 8 + 9, y: (dot.row || 0) * ROW + 4 + 9 };
 }
 
 function option(file, selected) {

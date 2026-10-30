@@ -817,7 +817,13 @@ export function layoutChart(chart, chats, expanded = [], activeFile = null) {
         link(`${parent.id}:${parent.depthEnd - 1}`, `${segment.id}:${segment.depthStart}`);
     }
 
-    return { dots, edges, laneCount: Math.max(cursor, 1) };
+    const depths = [...new Set(dots.map(dot => dot.depth))].sort((a, b) => a - b);
+    const rowOf = new Map(depths.map((depth, index) => [depth, index]));
+    for (const dot of dots) {
+        dot.row = rowOf.get(dot.depth);
+    }
+
+    return { dots, edges, laneCount: Math.max(cursor, 1), rowCount: depths.length };
 }
 
 export function buildFlow(chats, activeFile, metas = {}) {

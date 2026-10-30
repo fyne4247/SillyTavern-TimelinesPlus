@@ -186,6 +186,9 @@ test('collapsed chart keeps message numbers on shared rows', () => {
     assert.ok(rows.get(9)?.some(dot => dot.kind === 'end'));
     assert.ok(rows.get(9)?.some(dot => dot.kind === 'run'));
     assert.equal(rows.get(9).every(dot => dot.depth === 9), true);
+    const packedStart = collapsed.dots.find(dot => dot.depth === 0).row;
+    const packedShared = collapsed.dots.find(dot => dot.depth === 9 && dot.kind === 'run').row;
+    assert.equal(packedShared, packedStart + 1);
     const endLane = rows.get(9).find(dot => dot.kind === 'end').lane;
     const sharedLane = rows.get(9).find(dot => dot.kind === 'run').lane;
     assert.notEqual(endLane, sharedLane);
@@ -195,6 +198,10 @@ test('collapsed chart keeps message numbers on shared rows', () => {
     const endAfter = expanded.dots.find(dot => dot.kind === 'end');
     assert.equal(endAfter.depth, 9);
     assert.equal(endAfter.lane, endLane);
+    assert.equal(endAfter.row, expanded.dots.find(dot => dot.depth === 9 && dot.kind === 'run').row);
+    const row10 = expanded.dots.find(dot => dot.depth === 10).row;
+    const row12 = expanded.dots.find(dot => dot.depth === 12).row;
+    assert.equal(row12, row10 + 2);
     assert.ok(expanded.dots.some(dot => dot.depth === 12 && dot.lane === sharedLane));
     assert.equal(expanded.dots.filter(dot => dot.depth === 12).every(dot => dot.lane === sharedLane), true);
 });

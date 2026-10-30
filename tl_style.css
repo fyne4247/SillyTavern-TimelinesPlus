@@ -27,6 +27,12 @@
     display: none !important;
 }
 
+body.tlp-dock-open #sheld {
+    left: 0;
+    right: min(460px, 100vw);
+    width: auto;
+}
+
 #tlpDock .tlp-root,
 #networkContainer .tlp-root {
     height: 100%;
@@ -67,6 +73,13 @@
     min-height: 0;
     overflow: auto;
     background-color: var(--SmartThemeBlurTintColor, #221f1b);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.tlp-stage.is-dragging {
+    cursor: grabbing;
 }
 
 .tlp-board {
@@ -127,11 +140,9 @@
 }
 
 .tlp-hover {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    z-index: 5;
+    position: fixed;
+    z-index: 20;
+    width: min(240px, 70vw);
     padding: 6px 8px;
     border-radius: 6px;
     background: var(--SmartThemeBlurTintColor, #221f1b);
