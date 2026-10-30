@@ -26,3 +26,9 @@ CHAT_CHANGED now reloads a visible timeline using the newly open chat, preserves
 Verification: 11 model tests pass, including a new regression covering independent identical chats, siblings, grandchildren, and checkpoint links. Syntax checks and diff whitespace checks pass. Live chat-switch and visual verification still pending. Changes remain on staging; no main merge, push, or deployment.
 
 NEXT ACTION: Verify switching between an independent chat and a saved branch while the timeline is docked and popped out. Confirm that old asynchronous loads do not replace the new chat, and that imported branches without metadata remain separate as intended.
+
+## Owner-authorized integration and publication
+
+Owner explicitly requested merging all work and pushing. The default branch is master (there is no main branch). Refreshed origin; master was an ancestor of staging. Fast-forwarded master from 03f7434 to 802113c, including all eight staging commits. Reviewed the changes from this session and publication file list; private fixture chats and browser outputs remain ignored. Re-ran all 11 model tests successfully, checked JavaScript syntax, and checked whitespace. Live UI verification remains pending; this is not a claim of browser validation.
+
+NEXT ACTION: Push master and staging to origin after saving this record, then verify remote refs. Do not deploy or modify a live installation; that was not requested.
