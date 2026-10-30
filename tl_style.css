@@ -27,12 +27,6 @@
     display: none !important;
 }
 
-body.tlp-dock-open #sheld {
-    left: 0;
-    right: min(460px, 100vw);
-    width: auto;
-}
-
 #tlpDock .tlp-root,
 #networkContainer .tlp-root {
     height: 100%;
@@ -423,3 +417,27 @@ body.tlp-dock-open #sheld {
         max-height: 38vh;
     }
 }
+
+/* The timeline floats over the page and never changes the chat's geometry. */
+#tlpDock { top: 12px; right: 12px; width: min(460px, calc(100vw - 24px)); height: calc(100dvh - 24px); border: 1px solid var(--SmartThemeBorderColor, #6d6458); border-radius: 18px; overflow: hidden; }
+.tlp-root { position: relative; gap: 0; }
+.tlp-header { padding: 18px 16px 12px; gap: 12px; border-bottom: 1px solid var(--SmartThemeBorderColor, #6d6458); }
+.tlp-portrait { width: 48px; height: 58px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
+.tlp-status { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.95em; line-height: 1.45; opacity: 1; }
+.tlp-tools { flex-basis: 100%; gap: 5px; }
+.tlp-button { font: inherit; font-size: 0.82em; border-radius: 7px; padding: 5px 8px; margin: 0; }
+.tlp-button:focus-visible, .tlp-dot:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor, #c4a46a); outline-offset: 3px; }
+.tlp-file { width: 100%; border-radius: 7px; font-size: 0.85em; }
+.tlp-stage { padding: 24px 0; box-sizing: border-box; overscroll-behavior: contain; }
+.tlp-sizer { margin-inline: auto; }
+.tlp-orb { box-sizing: border-box; transition: box-shadow 150ms; }
+.tlp-dot.is-current .tlp-orb { background-color: var(--SmartThemeQuoteColor, #c4a46a); border-color: var(--SmartThemeBodyColor, #eee6da); box-shadow: 0 0 0 4px color-mix(in srgb, var(--SmartThemeQuoteColor, #c4a46a) 25%, transparent), 0 0 18px var(--SmartThemeQuoteColor, #c4a46a); }
+.tlp-dot.is-current .tlp-num { font-weight: bold; }
+.tlp-bubble { position: relative; inset: auto; flex: 0 1 auto; min-height: 0; width: auto; max-height: 48%; margin: 0 12px 12px; padding: 14px; display: flex; flex-direction: column; box-sizing: border-box; overflow: auto; user-select: text; }
+.tlp-bubble-text { min-height: 0; max-height: none; overflow: auto; overflow-wrap: anywhere; line-height: 1.5; margin: 10px 0 14px; }
+.tlp-who { font-weight: 600; font-size: 0.9em; }
+.tlp-actions { flex-shrink: 0; }
+.tlp-hover { max-height: 140px; overflow: hidden; overflow-wrap: anywhere; z-index: 10000; }
+@media (prefers-reduced-motion: reduce) { .tlp-orb { transition: none; } }
+
+.tlp-dot { width: 16px; }

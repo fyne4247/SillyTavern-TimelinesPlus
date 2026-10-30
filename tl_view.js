@@ -1,4 +1,4 @@
-import { buildChart, displayFileName, layoutChart, previewText } from './tl_model.js';
+import { buildChart, displayFileName, layoutChart } from './tl_model.js';
 
 const COL = 46;
 const ROW = 36;
@@ -44,8 +44,11 @@ export function mountTimeline(root, handlers) {
     function update(partial) {
         if (partial.chats) state.chats = partial.chats;
         if (partial.metas) state.metas = partial.metas;
-        if (partial.activeFile) state.activeFile = partial.activeFile;
-        if (Object.prototype.hasOwnProperty.call(partial, 'activeDepth')) state.activeDepth = partial.activeDepth;
+        if (partial.activeFile) {
+            state.activeFile = partial.activeFile;
+            state.openFile = partial.activeFile;
+        }
+        if (Object.prototype.hasOwnProperty.call(partial, 'activeDepth')) state.activeDepth = state.openDepth = partial.activeDepth;
         if (Object.prototype.hasOwnProperty.call(partial, 'loadingLabel')) state.loadingLabel = partial.loadingLabel;
         if (Object.prototype.hasOwnProperty.call(partial, 'popped')) state.popped = Boolean(partial.popped);
         if (Object.prototype.hasOwnProperty.call(partial, 'showFaces')) state.showFaces = Boolean(partial.showFaces);
@@ -77,6 +80,8 @@ export function mountTimeline(root, handlers) {
         if (state.charColor) root.style.setProperty('--tlp-char', state.charColor);
         root.append(renderBar(drawn));
         root.append(renderStage(drawn));
+        const selected = drawn.dots.find(dot => dot.key === state.bubbleKey);
+        if (selected) root.append(renderBubble(selected));
         if (state.hover) root.append(renderHover(state.hover));
         const stage = root.querySelector('.tlp-stage');
         if (stage) {
@@ -87,6 +92,12 @@ export function mountTimeline(root, handlers) {
 
     function renderBar(drawn) {
         const bar = el('div', 'tlp-header');
+        if (state.charAvatar) {
+            const portrait = el('img', 'tlp-portrait');
+            portrait.src = state.charAvatar;
+            portrait.alt = '';
+            bar.append(portrait);
+        }
         const status = el('div', 'tlp-status');
         const forks = (drawn.chart.nodes || []).filter(node => node.kind === 'end' || (node.childIds || []).length > 1).length;
         status.textContent = state.activeFile
@@ -113,6 +124,12 @@ export function mountTimeline(root, handlers) {
             else handlers.onPopout?.();
         }));
         tools.append(button('Close', () => handlers.onClose?.()));
+        tools.append(button('You are here', () => {
+            state.activeFile = state.openFile;
+            state.activeDepth = state.openDepth;
+            render();
+            root.querySelector('.tlp-dot.is-current')?.scrollIntoView({ block: 'center', inline: 'center' });
+        }));
         bar.append(tools);
         if ((drawn.chart.others || []).length) {
             const picker = document.createElement('select');
@@ -140,7 +157,7 @@ export function mountTimeline(root, handlers) {
         const stage = el('div', 'tlp-stage');
         const maxRow = drawn.dots.reduce((max, dot) => Math.max(max, dot.row || 0), 0);
         const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, dot.lane), 0);
-        const boardW = (maxLane + 1) * COL + 80;
+        const boardW = maxLane * 2 * COL + 32;
         const boardH = (maxRow + 1) * ROW + 36;
         const sizer = el('div', 'tlp-sizer');
         sizer.style.width = `${boardW * state.zoom}px`;
@@ -159,20 +176,17 @@ export function mountTimeline(root, handlers) {
             const to = byKey.get(edge.to);
             if (!from || !to) continue;
             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', String(center(from).x));
+            line.setAttribute('x1', String(center(from, maxLane).x));
             line.setAttribute('y1', String(center(from).y));
-            line.setAttribute('x2', String(center(to).x));
+            line.setAttribute('x2', String(center(to, maxLane).x));
             line.setAttribute('y2', String(center(to).y));
             svg.appendChild(line);
         }
         board.append(svg);
         for (const dot of drawn.dots) {
-            board.append(renderDot(dot, drawn));
+            board.append(renderDot(dot, maxLane));
         }
-        if (state.bubbleKey) {
-            const dot = byKey.get(state.bubbleKey);
-            if (dot) board.append(renderBubble(dot));
-        }
+
         sizer.append(board);
         stage.append(sizer);
         bindDrag(stage);
@@ -184,13 +198,15 @@ export function mountTimeline(root, handlers) {
         return stage;
     }
 
-    function renderDot(dot) {
+    function renderDot(dot, maxLane) {
+        const current = dot.depth === state.openDepth && dot.files.includes(state.openFile);
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `tlp-dot${dot.isUser ? ' is-user' : ''}${dot.kind === 'end' ? ' is-end' : ''}${dot.depth === state.activeDepth ? ' is-current' : ''}`;
-        button.style.left = `${dot.lane * COL + 8}px`;
+        button.className = `tlp-dot${dot.isUser ? ' is-user' : ''}${current ? ' is-current' : ''}`;
+        button.style.left = `${(dot.lane + maxLane) * COL + 8}px`;
         button.style.top = `${dot.row * ROW + 4}px`;
-        button.title = '';
+        button.setAttribute('aria-label', `${dot.name || 'Message'}, message ${dot.depth + 1}${current ? ', You are here' : ''}`);
+        if (current) button.setAttribute('aria-current', 'true');
         const orb = el('span', 'tlp-orb');
         const face = dot.isUser ? state.userAvatar : state.charAvatar;
         if (state.showFaces && face) {
@@ -220,10 +236,8 @@ export function mountTimeline(root, handlers) {
 
     function renderBubble(dot) {
         const bubble = el('div', 'tlp-bubble');
-        const top = dot.row * ROW + 4;
-        const left = dot.lane * COL + COL;
-        bubble.style.top = `${top}px`;
-        bubble.style.left = `${left}px`;
+        bubble.setAttribute('role', 'region');
+        bubble.setAttribute('aria-label', 'Selected message');
         const who = el('div', 'tlp-who');
         who.textContent = `${dot.name || (dot.isUser ? 'You' : 'Character')} · ${dot.depth + 1}`;
         if (dot.kind === 'end') who.textContent += ` · ${displayFileName(dot.file)} stops here`;
@@ -247,8 +261,8 @@ export function mountTimeline(root, handlers) {
         const tip = el('div', 'tlp-hover');
         tip.textContent = hover.name ? `${hover.name} · ${hover.depth + 1} — ${hover.text}` : hover.text;
         if (event) {
-            tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 260)}px`;
-            tip.style.top = `${Math.min(event.clientY + 14, window.innerHeight - 72)}px`;
+            tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, window.innerWidth - 260))}px`;
+            tip.style.top = `${Math.max(8, Math.min(event.clientY + 14, window.innerHeight - 160))}px`;
         }
         return tip;
     }
@@ -297,7 +311,7 @@ export function mountTimeline(root, handlers) {
     }
 
     function setZoom(value) {
-        state.zoom = Math.min(2.5, Math.max(0.2, value));
+        state.zoom = Math.min(2.5, Math.max(0.08, value));
         render();
     }
 
@@ -305,7 +319,7 @@ export function mountTimeline(root, handlers) {
         const stage = root.querySelector('.tlp-stage');
         const maxRow = drawn.dots.reduce((max, dot) => Math.max(max, dot.row || 0), 0);
         const maxLane = drawn.dots.reduce((max, dot) => Math.max(max, dot.lane), 0);
-        const boardW = (maxLane + 1) * COL + 80;
+        const boardW = maxLane * 2 * COL + 32;
         const boardH = (maxRow + 1) * ROW + 36;
         const width = stage?.clientWidth || root.clientWidth || 400;
         const height = stage?.clientHeight || 500;
@@ -321,8 +335,8 @@ export function mountTimeline(root, handlers) {
     return { update, destroy };
 }
 
-function center(dot) {
-    return { x: dot.lane * COL + 8 + 9, y: (dot.row || 0) * ROW + 4 + 9 };
+function center(dot, maxLane = 0) {
+    return { x: (dot.lane + maxLane) * COL + 8 + 8, y: (dot.row || 0) * ROW + 4 + 9 };
 }
 
 function option(file, selected) {

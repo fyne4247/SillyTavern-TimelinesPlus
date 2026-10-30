@@ -427,7 +427,10 @@ function placeTopBarButton() {
             if (button.classList.contains('not-in-chat')) {
                 return;
             }
-            openTimeline(false);
+            const dock = document.getElementById('tlpDock');
+            const modal = document.getElementById('timelinesModal');
+            if ((dock && !dock.hidden) || modal?.style.display === 'block') hideTimeline();
+            else openTimeline(false);
         });
         button.addEventListener('keydown', (event) => {
             if (event.key !== 'Enter' && event.key !== ' ') {
