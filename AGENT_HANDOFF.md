@@ -53,3 +53,9 @@ Implemented:
 Verified: 12 model tests pass, including lane alternation; syntax and whitespace checks pass. Added tests/browser-smoke.mjs and dev/ui-fixture.html using only synthetic data. Isolated headless Chromium smoke checks pass for edge alignment, unchanged chat geometry, square portrait, expand/collapse via double-click, docked reader cap, hover suppression, 5x current-node focus, wheel toggle, pop-out side reader, narrow viewport, and no page errors. Used existing cached Node Playwright and Chromium through PLAYWRIGHT_MODULE and PLAYWRIGHT_EXECUTABLE; Python Playwright is not installed. Verified all chosen icon names exist in the installed SillyTavern Font Awesome CSS. Screenshot visually inspected using synthetic data. No live chat/browser verification performed.
 
 NEXT ACTION: Present the staging change for owner review. Do not merge this UI follow-up to master, push, or deploy without owner authorization. Installed copy remains at 041657b; refreshing it will not show this new UI yet.
+
+## UI follow-up approved for merge and push
+
+Owner explicitly requested merging to the main branch and pushing. The repository default is master. Origin refreshed with no new divergence; clean working copy and fast-forward integration available. Previous verification remains valid: 12 passing model tests, passing isolated browser smoke checks, JavaScript syntax and whitespace checks. Integration includes startup repair 041657b and UI follow-up 4b83d5d.
+
+NEXT ACTION: Fast-forward master and staging to this record, push both to origin, and verify remote refs. Installed copy remains at 041657b; this authorization is for merge/push, not live deployment.
